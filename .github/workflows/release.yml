@@ -17,13 +17,25 @@ env:
   GO_VERSION: '1.27.1'
 
 jobs:
-  # One job rather than a matrix: Go cross-compiles all three targets without CGO,
-  # and building them together is what makes a single sums file over the whole
-  # release possible.
+  # One leg per target, each building and uploading its own artefacts, as in
+  # mcp-androzoo, mcp-koodous and mcp-ct. darwin/arm64 is built natively rather
+  # than cross-compiled, and a leg that fails does not hold up the others.
   release:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -53,59 +65,38 @@ jobs:
           fi
           echo "tag ${TAG} matches the declared version ${declared}"
 
-      - name: build and package
+      - name: build
         env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
           COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
-          # Read again rather than carry the value through GITHUB_ENV: one less
-          # place for it to be rewritten between the check and the build.
-          version=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/version/version.go)
-          drakkar_tested=$(sed -n 's/^const DrakkarTested = "\(.*\)"$/\1/p' internal/version/version.go)
-          go_version=$(go env GOVERSION)
-          mkdir -p dist
+          suffix="${GOOS}-${GOARCH}"
+          # Only Commit is injected. Version and DrakkarTested are constants in the
+          # source: the step above has already pinned Version to the tag, and the
+          # workflow has no business knowing a value that lives in the code.
+          ldflags="-s -w -X github.com/sebdraven/mcp-drakkar/internal/version.Commit=${COMMIT}"
+          go build -trimpath -ldflags="$ldflags" -o "mcp-drakkar-${suffix}" ./cmd/mcp-drakkar
+          # shasum, not sha256sum: the latter is absent from the macOS runner.
+          shasum -a 256 "mcp-drakkar-${suffix}" > "checksums-${suffix}.txt"
+          cat "checksums-${suffix}.txt"
 
-          for target in darwin/arm64 linux/amd64 linux/arm64; do
-            goos="${target%/*}"
-            goarch="${target#*/}"
-            name="mcp-drakkar-${version}-${goos}-${goarch}"
-            stage="dist/${name}"
-            mkdir -p "$stage"
-
-            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build \
-              -trimpath \
-              -ldflags "-s -w -X github.com/sebdraven/mcp-drakkar/internal/version.Commit=${COMMIT}" \
-              -o "${stage}/mcp-drakkar" \
-              ./cmd/mcp-drakkar
-
-            cp LICENSE.md README.md "$stage/"
-
-            # Commit in full, never abbreviated: an artefact that cannot be traced
-            # back to an exact tree is not evidence of anything.
-            cat > "${stage}/BUILD-INFO.txt" <<EOF
-          mcp-drakkar ${version}
-          commit:         ${COMMIT}
-          target:         ${goos}/${goarch}
-          go:             ${go_version}
-          drakkar tested: ${drakkar_tested}
-          EOF
-
-            tar -czf "dist/${name}.tar.gz" -C dist "${name}"
-            rm -rf "$stage"
-          done
-
-          cd dist
-          sha256sum *.tar.gz > SHA256SUMS.txt
-          cat SHA256SUMS.txt
-
-      - name: publish
-        # gh ships on every runner, so a third-party action here would add a supply
-        # chain dependency for something the runner already does.
+      - name: publish the artefacts
+        # gh ships on every runner, so a third-party action here would add a
+        # supply-chain dependency for something the runner already does.
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" --verify-tag --generate-notes \
-            dist/*.tar.gz \
-            dist/SHA256SUMS.txt
+          suffix="${GOOS}-${GOARCH}"
+          # The matrix legs race to create the release; the losers fail
+          # harmlessly and go straight to uploading.
+          gh release create "$TAG" --generate-notes --verify-tag || true
+          gh release upload "$TAG" --clobber \
+            "mcp-drakkar-${suffix}" \
+            "checksums-${suffix}.txt"
