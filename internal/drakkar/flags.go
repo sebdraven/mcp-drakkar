@@ -79,6 +79,7 @@ func init() {
 	known["--strings"] = optionalMultiFlag
 	known["--disasm"] = optionalMultiFlag
 	known["--disasm-normalize"] = multiFlag
+	known["--api-surface"] = switchFlag
 
 	// Resources
 	known["--resource"] = multiFlag
