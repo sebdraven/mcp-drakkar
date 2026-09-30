@@ -9,9 +9,11 @@ import (
 // InventoryInput is shared by the three inventory modes: same inputs, same
 // flags, three unrelated report shapes.
 type InventoryInput struct {
-	APK       string `json:"apk,omitempty" jsonschema:"path to one APK, inside a configured corpus directory"`
-	Directory string `json:"directory,omitempty" jsonschema:"path to a directory of APKs to process in bulk instead of one APK"`
+	APK       string `json:"apk,omitempty" jsonschema:"absolute path to one APK"`
+	Directory string `json:"directory,omitempty" jsonschema:"absolute path to a directory of APKs to process in bulk instead of one APK"`
 	Recursive bool   `json:"recursive,omitempty" jsonschema:"in bulk, walk subdirectories too"`
+
+	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
 	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"in bulk, how many per-sample reports to return inline; the rest stay on disk"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
@@ -37,7 +39,7 @@ func (s *Service) inventory(ctx context.Context, tool, mode string, in Inventory
 	if err != nil {
 		return nil, err
 	}
-	run, err := s.begin(tool)
+	out, err := s.begin(tool, in.OutDir)
 	if err != nil {
 		return nil, err
 	}
@@ -49,30 +51,30 @@ func (s *Service) inventory(ctx context.Context, tool, mode string, in Inventory
 	}
 	args.Switch(mode)
 
-	var reportPath, outDir string
+	var reportPath, bulkOut string
 	timeout := s.timeout(s.timeouts.Fast, in.TimeoutSeconds)
 	if dir != "" {
 		timeout = s.timeout(s.timeouts.Bulk, in.TimeoutSeconds)
-		outDir, err = run.Subdir("out")
+		bulkOut, err = out.subdir("out")
 		if err != nil {
 			return nil, err
 		}
-		args.Value("--bulk", dir).Value("--out", outDir).Value("--format", "json")
+		args.Value("--bulk", dir).Value("--out", bulkOut).Value("--format", "json")
 		args.SwitchIf("--recursive", in.Recursive)
 	} else {
-		reportPath, err = run.Path("report.json")
+		reportPath, err = out.file("report.json")
 		if err != nil {
 			return nil, err
 		}
 		args.JSONReport(reportPath)
 	}
 
-	env, _, err := s.invoke(ctx, run, timeout, args)
+	env, _, err := s.invoke(ctx, out, timeout, args)
 	if err != nil {
 		return nil, err
 	}
-	if outDir != "" {
-		if err := s.finishBulkOut(env, outDir, rows); err != nil {
+	if bulkOut != "" {
+		if err := s.finishBulkOut(env, bulkOut, rows); err != nil {
 			return nil, err
 		}
 		return env, nil
@@ -85,27 +87,29 @@ func (s *Service) inventory(ctx context.Context, tool, mode string, in Inventory
 
 // NativeArchInput is single-sample only: the mode reads ELF headers in memory.
 type NativeArchInput struct {
-	APK string `json:"apk" jsonschema:"path to one APK, inside a configured corpus directory"`
+	APK string `json:"apk" jsonschema:"absolute path to one APK"`
+
+	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
 }
 
 // NativeArch runs --native-arch. Text only: the mode has no JSON.
 func (s *Service) NativeArch(ctx context.Context, in NativeArchInput) (*Envelope, error) {
-	apk, err := s.resolveOne(in.APK)
+	apk, err := s.resolveOne("apk", in.APK)
 	if err != nil {
 		return nil, err
 	}
-	run, err := s.begin("native_arch")
+	out, err := s.begin("native_arch", in.OutDir)
 	if err != nil {
 		return nil, err
 	}
 	args := drakkar.New().Positional(apk).Switch("--native-arch")
-	env, res, err := s.invoke(ctx, run, s.timeout(s.timeouts.Fast, in.TimeoutSeconds), args)
+	env, res, err := s.invoke(ctx, out, s.timeout(s.timeouts.Fast, in.TimeoutSeconds), args)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.finishText(env, run, res.Stdout); err != nil {
+	if err := s.finishText(env, out, res.Stdout); err != nil {
 		return nil, err
 	}
 	return env, nil

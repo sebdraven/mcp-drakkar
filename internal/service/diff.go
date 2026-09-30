@@ -13,14 +13,16 @@ import (
 
 // DiffDexInput drives --diff-dex.
 type DiffDexInput struct {
-	A string `json:"a" jsonschema:"first input, an APK or a raw DEX inside a configured corpus directory"`
-	B string `json:"b" jsonschema:"second input, an APK or a raw DEX inside a configured corpus directory"`
+	A string `json:"a" jsonschema:"absolute path to the first input, an APK or a raw DEX"`
+	B string `json:"b" jsonschema:"absolute path to the second input, an APK or a raw DEX"`
 
 	Include   []string `json:"include,omitempty" jsonschema:"only compare classes whose Dalvik descriptor starts with one of these prefixes, for example Lcom/dy/; pass the prefixes of both sides"`
 	Normalize []string `json:"normalize,omitempty" jsonschema:"substitutions of the form FROM=TO applied to the class descriptor to build the pairing key, for example com/duiyun=com/dy; repeatable"`
 
 	Threshold *float64 `json:"threshold,omitempty" jsonschema:"method Jaccard above which two non-identical classes count as near; omit to leave Drakkar's own value in force, which is not a published empirical threshold"`
 	Ngram     *int     `json:"ngram,omitempty" jsonschema:"window size of the global method-word n-gram; omit to leave Drakkar's own value in force"`
+
+	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
 	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many entries of each array to return inline; the whole report stays on disk"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
@@ -32,11 +34,11 @@ func (s *Service) DiffDex(ctx context.Context, in DiffDexInput) (*Envelope, erro
 	if err != nil {
 		return nil, err
 	}
-	run, err := s.begin("diff_dex")
+	out, err := s.begin("diff_dex", in.OutDir)
 	if err != nil {
 		return nil, err
 	}
-	reportPath, err := run.Path("report.json")
+	reportPath, err := out.file("report.json")
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +50,7 @@ func (s *Service) DiffDex(ctx context.Context, in DiffDexInput) (*Envelope, erro
 		Int("--diff-ngram", in.Ngram).
 		JSONReport(reportPath)
 
-	env, _, err := s.invoke(ctx, run, s.timeout(s.timeouts.Diff, in.TimeoutSeconds), args)
+	env, _, err := s.invoke(ctx, out, s.timeout(s.timeouts.Diff, in.TimeoutSeconds), args)
 	if err != nil {
 		return nil, err
 	}
@@ -60,14 +62,16 @@ func (s *Service) DiffDex(ctx context.Context, in DiffDexInput) (*Envelope, erro
 
 // DiffStringsInput drives --diff-strings.
 type DiffStringsInput struct {
-	A string `json:"a" jsonschema:"first input, an APK or a raw DEX inside a configured corpus directory"`
-	B string `json:"b" jsonschema:"second input, an APK or a raw DEX inside a configured corpus directory"`
+	A string `json:"a" jsonschema:"absolute path to the first input, an APK or a raw DEX"`
+	B string `json:"b" jsonschema:"absolute path to the second input, an APK or a raw DEX"`
 
 	Normalize []string `json:"normalize,omitempty" jsonschema:"substitutions of the form FROM=TO applied before comparison, for example spyzie=BRAND, to keep only what differs beyond the name; repeatable"`
 
 	LiteralsOnly bool `json:"literals_only,omitempty" jsonschema:"mask the structural noise of the DEX format: Dalvik descriptors and bare identifiers"`
 
 	MinLength *int `json:"min_length,omitempty" jsonschema:"ignore strings shorter than this; omit to leave Drakkar's own value in force"`
+
+	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
 	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many entries of each array to return inline; the whole report stays on disk"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
@@ -79,11 +83,11 @@ func (s *Service) DiffStrings(ctx context.Context, in DiffStringsInput) (*Envelo
 	if err != nil {
 		return nil, err
 	}
-	run, err := s.begin("diff_strings")
+	out, err := s.begin("diff_strings", in.OutDir)
 	if err != nil {
 		return nil, err
 	}
-	reportPath, err := run.Path("report.json")
+	reportPath, err := out.file("report.json")
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +98,7 @@ func (s *Service) DiffStrings(ctx context.Context, in DiffStringsInput) (*Envelo
 		Int("--strings-min-len", in.MinLength).
 		JSONReport(reportPath)
 
-	env, _, err := s.invoke(ctx, run, s.timeout(s.timeouts.Diff, in.TimeoutSeconds), args)
+	env, _, err := s.invoke(ctx, out, s.timeout(s.timeouts.Diff, in.TimeoutSeconds), args)
 	if err != nil {
 		return nil, err
 	}
@@ -106,14 +110,16 @@ func (s *Service) DiffStrings(ctx context.Context, in DiffStringsInput) (*Envelo
 
 // DiffExplainInput drives --diff-explain.
 type DiffExplainInput struct {
-	A string `json:"a" jsonschema:"first input, an APK or a raw DEX inside a configured corpus directory"`
-	B string `json:"b" jsonschema:"second input, an APK or a raw DEX inside a configured corpus directory"`
+	A string `json:"a" jsonschema:"absolute path to the first input, an APK or a raw DEX"`
+	B string `json:"b" jsonschema:"absolute path to the second input, an APK or a raw DEX"`
 
 	Include   []string `json:"include,omitempty" jsonschema:"only compare classes whose Dalvik descriptor starts with one of these prefixes; pass the prefixes of both sides"`
 	Normalize []string `json:"normalize,omitempty" jsonschema:"substitutions of the form FROM=TO applied before comparison; indispensable between two differently-obfuscated namespaces, otherwise every operand diverges on the namespace alone"`
 
 	Context  *int `json:"context,omitempty" jsonschema:"identical context lines shown around each change in the LCS-aligned rendering; omit to leave Drakkar's own value in force"`
 	AlignCap *int `json:"align_cap,omitempty" jsonschema:"per-method instruction ceiling for LCS alignment, which is quadratic in time and memory; omit to leave Drakkar's own value in force"`
+
+	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
 	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many entries of each array to return inline; the whole report stays on disk"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
@@ -125,11 +131,11 @@ func (s *Service) DiffExplain(ctx context.Context, in DiffExplainInput) (*Envelo
 	if err != nil {
 		return nil, err
 	}
-	run, err := s.begin("diff_explain")
+	out, err := s.begin("diff_explain", in.OutDir)
 	if err != nil {
 		return nil, err
 	}
-	reportPath, err := run.Path("report.json")
+	reportPath, err := out.file("report.json")
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +147,7 @@ func (s *Service) DiffExplain(ctx context.Context, in DiffExplainInput) (*Envelo
 		Int("--explain-align-cap", in.AlignCap).
 		JSONReport(reportPath)
 
-	env, _, err := s.invoke(ctx, run, s.timeout(s.timeouts.Diff, in.TimeoutSeconds), args)
+	env, _, err := s.invoke(ctx, out, s.timeout(s.timeouts.Diff, in.TimeoutSeconds), args)
 	if err != nil {
 		return nil, err
 	}
@@ -157,13 +163,15 @@ func (s *Service) DiffExplain(ctx context.Context, in DiffExplainInput) (*Envelo
 // and the JSON report carries every pair regardless. Exposing it would suggest a
 // bound on the answer that it does not place.
 type DiffMatrixInput struct {
-	Directory string `json:"directory" jsonschema:"directory of APKs or raw DEX files, inside a configured corpus directory"`
+	Directory string `json:"directory" jsonschema:"absolute path to a directory of APKs or raw DEX files"`
 	Recursive bool   `json:"recursive,omitempty" jsonschema:"walk subdirectories too"`
 
 	Metric    string   `json:"metric,omitempty" jsonschema:"which metric drives the matrix and the grouping: opcodes for same engine, strings for same constants; both are computed either way; omit to leave Drakkar's own choice in force"`
 	Normalize []string `json:"normalize,omitempty" jsonschema:"substitutions of the form FROM=TO applied to descriptors and strings before comparison; indispensable on a multi-namespace batch, otherwise descriptors sink the similarity for a reason unrelated to the code"`
 
 	Threshold *float64 `json:"threshold,omitempty" jsonschema:"single-linkage grouping threshold; omit to leave Drakkar's own value in force"`
+
+	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
 	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many pairs and samples to return inline; the whole n-squared matrix stays on disk"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call; an all-against-all run over a hundred samples takes a while"`
@@ -172,15 +180,15 @@ type DiffMatrixInput struct {
 // DiffMatrix runs --diff-matrix. The pairs in the report are already sorted by
 // the chosen metric, descending, so the inline preview is the top of the ranking.
 func (s *Service) DiffMatrix(ctx context.Context, in DiffMatrixInput) (*Envelope, error) {
-	dir, err := s.scope.Dir(in.Directory)
+	dir, err := requireAbs("directory", in.Directory)
 	if err != nil {
 		return nil, err
 	}
-	run, err := s.begin("diff_matrix")
+	out, err := s.begin("diff_matrix", in.OutDir)
 	if err != nil {
 		return nil, err
 	}
-	reportPath, err := run.Path("report.json")
+	reportPath, err := out.file("report.json")
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +200,7 @@ func (s *Service) DiffMatrix(ctx context.Context, in DiffMatrixInput) (*Envelope
 		Float("--matrix-threshold", in.Threshold).
 		JSONReport(reportPath)
 
-	env, _, err := s.invoke(ctx, run, s.timeout(s.timeouts.Matrix, in.TimeoutSeconds), args)
+	env, _, err := s.invoke(ctx, out, s.timeout(s.timeouts.Matrix, in.TimeoutSeconds), args)
 	if err != nil {
 		return nil, err
 	}
@@ -203,12 +211,13 @@ func (s *Service) DiffMatrix(ctx context.Context, in DiffMatrixInput) (*Envelope
 }
 
 func (s *Service) resolvePair(a, b string) (string, string, error) {
-	resolved, err := s.scope.Files([]string{a, b})
+	first, err := requireAbs("a", a)
 	if err != nil {
 		return "", "", err
 	}
-	if len(resolved) != 2 {
-		return "", "", errTwoInputs
+	second, err := requireAbs("b", b)
+	if err != nil {
+		return "", "", err
 	}
-	return resolved[0], resolved[1], nil
+	return first, second, nil
 }

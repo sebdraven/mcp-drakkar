@@ -11,8 +11,8 @@ import (
 // Drakkar dispatches them as one branch with one output shape; the selector is a
 // closed enumeration, so the whitelist property is intact.
 type ResourcesInput struct {
-	APK       string `json:"apk,omitempty" jsonschema:"path to one APK, inside a configured corpus directory"`
-	Directory string `json:"directory,omitempty" jsonschema:"path to a directory of APKs to process in bulk instead of one APK"`
+	APK       string `json:"apk,omitempty" jsonschema:"absolute path to one APK"`
+	Directory string `json:"directory,omitempty" jsonschema:"absolute path to a directory of APKs to process in bulk instead of one APK"`
 	Recursive bool   `json:"recursive,omitempty" jsonschema:"in bulk, walk subdirectories too"`
 
 	Mode string `json:"mode" jsonschema:"which view: name resolves resource names, id resolves resource identifiers, dump lists the table, xref joins DEX constants to real resource entries, orphans lists resources no DEX constant references"`
@@ -20,6 +20,8 @@ type ResourcesInput struct {
 	Names []string `json:"names,omitempty" jsonschema:"for mode name: the resource names to resolve, the key of R.type.name; repeatable"`
 	IDs   []string `json:"ids,omitempty" jsonschema:"for mode id: identifiers as 0x7f110228, 7f110228 or 2131886120; repeatable"`
 	Types []string `json:"types,omitempty" jsonschema:"for mode dump: restrict to these resource types, for example string, layout, drawable; omit for every type"`
+
+	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
 	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many entries to return inline; the whole report stays on disk"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
@@ -32,11 +34,11 @@ func (s *Service) Resources(ctx context.Context, in ResourcesInput) (*Envelope, 
 	if err != nil {
 		return nil, err
 	}
-	run, err := s.begin("resources_" + in.Mode)
+	out, err := s.begin("resources_"+in.Mode, in.OutDir)
 	if err != nil {
 		return nil, err
 	}
-	reportPath, err := run.Path("report.json")
+	reportPath, err := out.file("report.json")
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +76,7 @@ func (s *Service) Resources(ctx context.Context, in ResourcesInput) (*Envelope, 
 	}
 	args.JSONReport(reportPath)
 
-	env, _, err := s.invoke(ctx, run, timeout, args)
+	env, _, err := s.invoke(ctx, out, timeout, args)
 	if err != nil {
 		return nil, err
 	}

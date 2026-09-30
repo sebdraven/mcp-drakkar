@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sebdraven/mcp-drakkar/internal/corpus"
 	"github.com/sebdraven/mcp-drakkar/internal/service"
 )
 
@@ -52,7 +51,7 @@ func connect(t *testing.T) *mcp.ClientSession {
 	// AddTool panics when a schema cannot be inferred from an input or output
 	// type, which would leave the server dead on arrival. Registering here is what
 	// catches that before a release rather than on a client's first connection.
-	Register(server, service.New(corpus.New(nil, ""), service.DefaultTimeouts()))
+	Register(server, service.New(service.DefaultTimeouts()))
 
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverSession, err := server.Connect(ctx, serverTransport, nil)
@@ -119,15 +118,17 @@ func TestToolNamesAreNamespaced(t *testing.T) {
 	}
 }
 
-func TestInstructionsStateTheEnvelopeAndThePerimeter(t *testing.T) {
+func TestInstructionsStateTheEnvelopeAndThePathRules(t *testing.T) {
 	// A caller that never reads stderr is the failure mode this server exists to
-	// remove, so the contract has to be stated where every client sees it.
+	// remove, so the contract has to be stated where every client sees it. And a
+	// caller that passes a relative path has to be told before it does.
 	for _, want := range []string{
 		"stderr",
 		"report_path",
 		"tails",
 		"truncated",
-		"corpus",
+		"absolute",
+		"out_dir",
 		"never builds",
 		"drakkar_version",
 	} {

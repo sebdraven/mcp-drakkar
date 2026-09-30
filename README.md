@@ -20,49 +20,42 @@ hand and pasting the output into a conversation:
 
 ## Configuration
 
-Two directories, and nothing outside them:
-
-| Variable | Flag | What it is |
-|---|---|---|
-| `DRAKKAR_CORPUS_DIRS` | `-corpus` | `:`-separated list of directories holding the samples. No input outside them is ever read. |
-| `DRAKKAR_REPORTS_DIR` | `-reports` | The only directory this server writes to: reports, and anything a mode extracts. |
-
-Paths are made absolute, then fully resolved with `EvalSymlinks`, and only then
-checked for containment — without that second step a link planted inside a corpus
-directory would name any file on the machine while passing a textual check.
-
-Optional, all Go durations:
-`DRAKKAR_TIMEOUT_FAST` (2m), `DRAKKAR_TIMEOUT_DIFF` (10m),
-`DRAKKAR_TIMEOUT_MATRIX` (1h), `DRAKKAR_TIMEOUT_BULK` (1h).
-
-Neither directory is required to start. The server comes up, logs what is missing
-to stderr, and every tool that takes a path refuses with a message naming the
-variable to set — a server that dies before the client can ask cannot tell it
-anything.
-
-`drakkar` must be on the `PATH`. **This server never builds, installs or
-downloads it**; if it is absent, `drakkar_version` says so and every other tool
-refuses with the same message.
+None. There is nothing to declare in advance:
 
 ```json
 {
   "mcpServers": {
     "drakkar": {
-      "command": "mcp-drakkar",
-      "env": {
-        "DRAKKAR_CORPUS_DIRS": "/Users/you/pCloud Drive/These/corpus:/Users/you/samples",
-        "DRAKKAR_REPORTS_DIR": "/Users/you/drakkar-reports"
-      }
+      "command": "mcp-drakkar"
     }
   }
 }
 ```
 
+Paths are tool parameters, given per call, the way they are in a shell. They must
+be **absolute** — a relative path would be resolved against the child's working
+directory, which is the call's output directory and not your shell.
+
+Output goes wherever the call's `out_dir` says. Omitted, the server makes a fresh
+directory under the system temp directory and returns its path in `report_path`.
+That fallback exists for one reason: Drakkar's own `--out` defaults to `./reports`
+*relative to the working directory*, which for a server started by an MCP client
+is arbitrary. The server never lets that default apply — it substitutes an
+absolute directory and says where it is.
+
+Optional, all Go durations:
+`DRAKKAR_TIMEOUT_FAST` (2m), `DRAKKAR_TIMEOUT_DIFF` (10m),
+`DRAKKAR_TIMEOUT_MATRIX` (1h), `DRAKKAR_TIMEOUT_BULK` (1h).
+
+`drakkar` must be on the `PATH`. **This server never builds, installs or
+downloads it**; if it is absent, `drakkar_version` says so and every other tool
+refuses with the same message.
+
 ## Tools
 
 | Tool | What it answers |
 |---|---|
-| `drakkar_version` | which Drakkar is in use, which one this server was written against, the configured perimeter — and it works before anything is configured |
+| `drakkar_version` | which Drakkar is in use, which one this server was written against, the timeouts, and where output lands by default |
 | `drakkar_legend` | Drakkar's own legend for a mode: where a metric's limits are stated |
 | `drakkar_manifest` | permissions, components, intent filters, derived entry points |
 | `drakkar_cert` | signature schemes v1/v2/v3/v3.1 and the X.509 certificates |
@@ -164,11 +157,11 @@ terminal, and it never is here. One fewer duplicated default.
   to hold `VT_API_KEY` or `KOODOUS_TOKEN`. The child environment is built
   explicitly — `PATH`, `HOME`, `TMPDIR`, `RUST_LOG` — rather than inherited, so no
   token reaches Drakkar through it even if one is set here.
-- **`--assets-hash-file` and `--assets-hash-exclude-file`.** They would let a
-  caller name any file on the machine for the server to read, which is what the
-  perimeter exists to prevent. Pass the hashes inline.
-- **`--rules`.** Pointing the engine at an arbitrary directory is a bench
-  configuration decision, and the same arbitrary-read argument applies.
+- **`--assets-hash-file` and `--assets-hash-exclude-file`.** The hashes pass
+  inline instead, which keeps the filter visible in the `argv` the envelope
+  reports rather than hidden behind a file path.
+- **`--rules`.** Pointing the engine at a different rule directory is a
+  bench-configuration decision, not a per-measurement one.
 - **`--matrix-top`.** It truncates the text ranking only; the JSON report carries
   every pair regardless. Exposing it would imply a bound on the answer that it
   does not place.
@@ -179,20 +172,19 @@ MITRE catalogue, and a first call after a cache miss downloads it.
 ## Layout
 
 ```
-cmd/mcp-drakkar/      flags, startup diagnostics, stdio transport
+cmd/mcp-drakkar/      the -version flag, startup diagnostics, stdio transport
 internal/drakkar/     the flag whitelist, the argv builder, the runner, the stderr
                       marker parser, the TSV parsers
-internal/corpus/      path resolution and the perimeter
-internal/service/     one mode to one answer: head/tail split, declared truncation,
-                      report writing
+internal/service/     one mode to one answer: output directory, head/tail split,
+                      declared truncation, report writing
 internal/mcptools/    the 22 tools and their typed inputs
 internal/version/     what the server declares about itself
 ```
 
 **No test invokes `drakkar`.** The whitelist is tested on the argv it produces,
-the TSV parsers on fixtures, the perimeter on a temporary directory with real
-symlinks, and the tool registration over an in-memory MCP transport. So CI needs
-no Rust toolchain, no corpus, and no macOS.
+the TSV parsers on fixtures, the head/tail split on decoded reports, the output
+directory on a temporary directory, and the tool registration over an in-memory
+MCP transport. So CI needs no Rust toolchain, no samples, and no macOS.
 
 ## Releases
 

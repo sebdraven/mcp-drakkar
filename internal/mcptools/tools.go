@@ -20,10 +20,12 @@ import (
 )
 
 // Instructions is handed to the client once, so that the envelope contract and
-// the perimeter are not repeated in twenty-two descriptions.
+// the path rules are not repeated in twenty-two descriptions.
 const Instructions = `Drakkar is a static analysis engine for Android APKs and raw DEX files. Every tool here runs the drakkar binary found on PATH; this server never builds, installs or downloads it.
 
-Inputs must live inside the configured corpus directories and nothing is written outside the configured reports directory. Call drakkar_version to see which Drakkar is in use and what the perimeter is.
+Paths are parameters, given per call, and must be absolute — a relative one would be resolved against a working directory nobody chose. There is nothing to configure and no directory to declare in advance.
+
+Output goes where out_dir says. Omitted, the server makes a fresh directory under the system temp directory and returns its path in report_path, so a report never lands somewhere unpredictable. Call drakkar_version to see which Drakkar is in use and where that fallback is.
 
 Every tool answers with the same envelope:
   drakkar     which Drakkar, the exact argv, the exit code, the duration, whether it timed out
@@ -45,9 +47,8 @@ func Register(s *mcp.Server, svc *service.Service) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_version",
-		Description: "Report which Drakkar is on the PATH, which Drakkar this server was written against, the configured corpus and reports directories, and the timeouts. " +
-			"Call it first when something refuses, and call it to date a measurement: nothing else records which engine produced a number. " +
-			"It is the one tool that works before anything is configured.",
+		Description: "Report which Drakkar is on the PATH, which Drakkar this server was written against, the timeouts in force, and where output lands when a call names no out_dir. " +
+			"Call it first when something refuses, and call it to date a measurement: nothing else records which engine produced a number.",
 	}, r.version)
 
 	mcp.AddTool(s, &mcp.Tool{
