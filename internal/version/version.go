@@ -8,6 +8,10 @@ const Version = "0.1.0"
 
 // DrakkarTested names the Drakkar the tool surface was written against. Drakkar
 // has been at 0.1.0 for a while, so the commit is the discriminating half.
+//
+// A constant here rather than a -ldflags injection for the same reason as
+// Version: injecting it would mean the release workflow had to know a value that
+// lives in the code.
 const DrakkarTested = "0.1.0 (9f2adda)"
 
 // Commit is injected at link time by the release workflow.

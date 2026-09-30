@@ -201,11 +201,25 @@ Tag `vX.Y.Z`. The workflow refuses a tag that disagrees with `Version` in
 source rather than injected at link time: a version that only ever comes from
 `-ldflags` can never disagree with the tag.
 
-Each release carries one `tar.gz` per target — `darwin/arm64`, `linux/amd64`,
-`linux/arm64` — holding the binary, `LICENSE.md`, `README.md` and a
-`BUILD-INFO.txt` with the full commit, the target, the Go version and the Drakkar
-version the server was developed against. Plus one `SHA256SUMS.txt`, never
-abbreviated.
+Each release carries one bare binary per target — `mcp-drakkar-darwin-arm64`,
+`mcp-drakkar-linux-amd64`, `mcp-drakkar-linux-arm64` — downloadable as-is, with
+nothing to unpack. Each comes with a `checksums-<target>.txt` holding its full
+SHA-256, never abbreviated.
+
+Nothing travels alongside the binary, so the binary answers for itself:
+
+```
+$ mcp-drakkar -version
+mcp-drakkar 0.1.0
+commit:         <the full commit, injected at link time>
+target:         darwin/arm64
+go:             go1.27.1
+drakkar tested: 0.1.0 (9f2adda)
+```
+
+Only the commit is injected. `Version` and `DrakkarTested` are constants in
+`internal/version`, and the target and Go version come from the runtime — so the
+release workflow never has to restate a value that lives in the code.
 
 No Docker, no published `go install` path.
 
