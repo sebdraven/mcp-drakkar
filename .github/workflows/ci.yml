@@ -1,0 +1,137 @@
+name: ci
+
+# Every branch, no tags: a tag push is release.yml's business. A branches filter
+# already excludes tags, so no tags-ignore is needed.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned to the patch. 'stable' or '1.27' would drift, and two runs three months
+  # apart have to be comparable.
+  GO_VERSION: '1.27.1'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # The cache is declared below instead, so the key is visible in this file.
+          cache: false
+
+      - uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ env.GO_VERSION }}-
+
+      - name: gofmt
+        run: |
+          set -euo pipefail
+          unformatted=$(gofmt -l ./cmd ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - run: go vet ./...
+
+      # No drakkar and no corpus: the flag whitelist is tested on the argv it
+      # produces, the TSV parsers on fixtures, and the perimeter on a temporary
+      # directory. Nothing here needs a Rust toolchain, a sample, or macOS.
+      - run: go test -race ./...
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ env.GO_VERSION }}-
+
+      - run: go build -trimpath -o bin/mcp-drakkar ./cmd/mcp-drakkar
+
+      - name: version reports itself
+        run: ./bin/mcp-drakkar -version
+
+  # Static analysis of the workflows themselves. A pipeline is an execution
+  # environment with a token attached, so it gets the same scrutiny as the code.
+  zizmor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # The project publishes precompiled archives but no sums file, so the sum is
+      # pinned here, taken from the digest GitHub publishes for the asset and
+      # verified against the downloaded archive. That covers a swapped or corrupted
+      # download; the attestation below is what covers their build.
+      ZIZMOR_VERSION: '1.30.1'
+      ZIZMOR_SHA256: 'e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: install zizmor
+        env:
+          # gh ships on every runner; the token is only used to read the public
+          # attestation for zizmorcore/zizmor.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive="zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "$archive" \
+            "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/${archive}"
+          echo "${ZIZMOR_SHA256}  ${archive}" | sha256sum --check --strict
+          gh attestation verify "$archive" --repo zizmorcore/zizmor
+          tar -xzf "$archive" zizmor
+          ./zizmor --version
+
+      # Non-blocking for now, by construction rather than by continue-on-error:
+      # --no-exit-codes makes zizmor exit 0 even with findings, so the job is green
+      # on purpose and turning it blocking later means deleting one flag. A linter
+      # permanently red is a linter nobody reads.
+      - name: audit the workflows
+        run: |
+          set -euo pipefail
+          ./zizmor --format plain --no-exit-codes .github/workflows/ | tee zizmor.txt
+          {
+            echo "## zizmor ${ZIZMOR_VERSION} — advisory, does not fail the build"
+            echo
+            echo '```'
+            cat zizmor.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

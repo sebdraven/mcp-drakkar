@@ -1,0 +1,111 @@
+name: release
+
+# Tags only: a publication should be named and deliberate, not a side effect of
+# merging.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: '1.27.1'
+
+jobs:
+  # One job rather than a matrix: Go cross-compiles all three targets without CGO,
+  # and building them together is what makes a single sums file over the whole
+  # release possible.
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # No cache in a publishing workflow: an entry poisoned on a branch would
+          # be baked into a release artefact.
+          cache: false
+
+      - name: the tag must match the version declared in the code
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          declared=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/version/version.go)
+          if [ -z "$declared" ]; then
+            echo "could not read Version from internal/version/version.go"
+            exit 1
+          fi
+          if [ "$TAG" != "v${declared}" ]; then
+            echo "tag ${TAG} does not match the version declared in internal/version/version.go (${declared})."
+            echo "Either retag as v${declared}, or update the constant and tag again."
+            exit 1
+          fi
+          echo "tag ${TAG} matches the declared version ${declared}"
+
+      - name: build and package
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # Read again rather than carry the value through GITHUB_ENV: one less
+          # place for it to be rewritten between the check and the build.
+          version=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/version/version.go)
+          drakkar_tested=$(sed -n 's/^const DrakkarTested = "\(.*\)"$/\1/p' internal/version/version.go)
+          go_version=$(go env GOVERSION)
+          mkdir -p dist
+
+          for target in darwin/arm64 linux/amd64 linux/arm64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            name="mcp-drakkar-${version}-${goos}-${goarch}"
+            stage="dist/${name}"
+            mkdir -p "$stage"
+
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build \
+              -trimpath \
+              -ldflags "-s -w -X github.com/sebdraven/mcp-drakkar/internal/version.Commit=${COMMIT}" \
+              -o "${stage}/mcp-drakkar" \
+              ./cmd/mcp-drakkar
+
+            cp LICENSE.md README.md "$stage/"
+
+            # Commit in full, never abbreviated: an artefact that cannot be traced
+            # back to an exact tree is not evidence of anything.
+            cat > "${stage}/BUILD-INFO.txt" <<EOF
+          mcp-drakkar ${version}
+          commit:         ${COMMIT}
+          target:         ${goos}/${goarch}
+          go:             ${go_version}
+          drakkar tested: ${drakkar_tested}
+          EOF
+
+            tar -czf "dist/${name}.tar.gz" -C dist "${name}"
+            rm -rf "$stage"
+          done
+
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: publish
+        # gh ships on every runner, so a third-party action here would add a supply
+        # chain dependency for something the runner already does.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" --verify-tag --generate-notes \
+            dist/*.tar.gz \
+            dist/SHA256SUMS.txt
