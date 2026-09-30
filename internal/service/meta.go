@@ -70,7 +70,7 @@ func (s *Service) Version(ctx context.Context, _ VersionInput) (*Envelope, error
 
 // LegendInput selects which legend to print.
 type LegendInput struct {
-	Topic string `json:"topic" jsonschema:"one of manifest, cert, dating, assets, entries, resources, diff_dex, diff_strings, diff_explain, diff_matrix, disasm"`
+	Topic string `json:"topic" jsonschema:"one of manifest, cert, dating, assets, entries, resources, api_surface, diff_dex, diff_strings, diff_explain, diff_matrix, disasm"`
 }
 
 // Legend prints Drakkar's own legend for a mode. These texts are what keeps a
@@ -94,6 +94,8 @@ func (s *Service) Legend(ctx context.Context, in LegendInput) (*Envelope, error)
 		args.Switch("--list-entries")
 	case "resources":
 		args.Switch("--resource-xref")
+	case "api_surface":
+		args.Switch("--api-surface")
 	case "disasm":
 		args.Optional("--disasm", nil)
 	case "diff_dex":
@@ -109,7 +111,7 @@ func (s *Service) Legend(ctx context.Context, in LegendInput) (*Envelope, error)
 		args.Value("--diff-matrix", legendPlaceholder)
 		note = legendPlaceholderNote
 	default:
-		return nil, fmt.Errorf("topic %q is not one of manifest, cert, dating, assets, entries, resources, diff_dex, diff_strings, diff_explain, diff_matrix, disasm", in.Topic)
+		return nil, fmt.Errorf("topic %q is not one of manifest, cert, dating, assets, entries, resources, api_surface, diff_dex, diff_strings, diff_explain, diff_matrix, disasm", in.Topic)
 	}
 
 	env, res, err := s.invokeIn(ctx, "", 30*time.Second, args)

@@ -65,6 +65,7 @@ refuses with the same message.
 | `drakkar_disasm` | selected classes disassembled with operands resolved |
 | `drakkar_dyn_entrypoints` | components reached other than by a manifest declaration |
 | `drakkar_reflection_inputs` | where the name of each reflection target comes from |
+| `drakkar_api_surface` | the protocol the sample declares: Retrofit verbs and routes, `@Path`/`@Query` names, Gson `@SerializedName` keys |
 | `drakkar_orphan_audit` | methods unreachable from the roots, in islands, over four root stages |
 | `drakkar_probe_api` | is this one API a graph node, and is it reachable, with paths |
 | `drakkar_diff_dex` | same source tree? opcode fingerprints, blind to operands by design |
@@ -177,7 +178,7 @@ internal/drakkar/     the flag whitelist, the argv builder, the runner, the stde
                       marker parser, the TSV parsers
 internal/service/     one mode to one answer: output directory, head/tail split,
                       declared truncation, report writing
-internal/mcptools/    the 22 tools and their typed inputs
+internal/mcptools/    the 23 tools and their typed inputs
 internal/version/     what the server declares about itself
 ```
 
