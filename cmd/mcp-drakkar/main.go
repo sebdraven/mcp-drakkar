@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sebdraven/mcp-drakkar/internal/corpus"
@@ -29,7 +30,15 @@ func main() {
 	flag.Parse()
 
 	if *showVer {
-		fmt.Printf("%s (commit %s, built against drakkar %s)\n", version.Version, version.Commit, version.DrakkarTested)
+		// Releases publish bare binaries, so nothing travels alongside to say what
+		// this one is. It has to answer that itself: the commit is injected at link
+		// time, the rest the binary already knows. Never abbreviated — an artefact
+		// that cannot be traced to an exact tree is not evidence of anything.
+		fmt.Printf("mcp-drakkar %s\n", version.Version)
+		fmt.Printf("commit:         %s\n", version.Commit)
+		fmt.Printf("target:         %s/%s\n", runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("go:             %s\n", runtime.Version())
+		fmt.Printf("drakkar tested: %s\n", version.DrakkarTested)
 		return
 	}
 
