@@ -12,6 +12,7 @@ import (
 // The expected surface, written out rather than counted, so that adding or losing
 // a tool is a deliberate edit here and not a silent change in behaviour.
 var wantTools = []string{
+	"drakkar_api_surface",
 	"drakkar_assets",
 	"drakkar_cert",
 	"drakkar_dating",
