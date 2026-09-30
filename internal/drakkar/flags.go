@@ -1,9 +1,10 @@
 package drakkar
 
 // The flag table mirrors the clap `Cli` struct of drakkar/src/main.rs at
-// 9f2adda, and it is the whitelist: Args refuses any name absent from it, so a
-// flag this table does not know cannot reach the command line. A parameter that
-// maps to no known flag is an error, never a passthrough.
+// f5237b9573ed85307d0d0f404d8a03a7312e9fdc, and it is the whitelist: Args
+// refuses any name absent from it, so a flag this table does not know cannot
+// reach the command line. A parameter that maps to no known flag is an error,
+// never a passthrough.
 //
 // Deliberately absent, and asserted absent by a test: --enrich, --enrich-input,
 // --cache, --rate, --force. Mass enrichment — cached, rate-limited, over a list
