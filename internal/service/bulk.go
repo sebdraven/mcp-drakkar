@@ -2,15 +2,12 @@ package service
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 )
-
-var errTwoInputs = errors.New("two inputs are required")
 
 // In bulk, Drakkar writes one report per sample into --out and leaves stdout
 // empty. So the envelope's tail is built from those files: the total is how many
@@ -70,10 +67,11 @@ func (s *Service) finishBulkOut(env *Envelope, dir string, maxRows int) error {
 	return nil
 }
 
-// resolveOne resolves the single-sample input of a mode that accepts an APK or a
-// raw DEX.
-func (s *Service) resolveOne(p string) (string, error) {
-	return s.scope.File(p)
+// resolveOne checks the single-sample input of a mode that accepts an APK or a
+// raw DEX. Whether the file exists, and whether Drakkar can read it, is
+// Drakkar's answer to give.
+func (s *Service) resolveOne(field, p string) (string, error) {
+	return requireAbs(field, p)
 }
 
 // resolveSingleOrBulk enforces the one structural rule the server owns: exactly
@@ -85,10 +83,10 @@ func (s *Service) resolveSingleOrBulk(file, dir string) (resolvedFile string, re
 	case file == "" && dir == "":
 		return "", "", fmt.Errorf("pass a single input, or a directory to process in bulk")
 	case file != "":
-		f, err := s.scope.File(file)
+		f, err := requireAbs("the single input", file)
 		return f, "", err
 	default:
-		d, err := s.scope.Dir(dir)
+		d, err := requireAbs("directory", dir)
 		return "", d, err
 	}
 }
