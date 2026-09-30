@@ -47,7 +47,7 @@ func (s *Service) Assets(ctx context.Context, in AssetsInput) (*Envelope, error)
 	if err := checkHashes("exclude_hashes", in.ExcludeHashes); err != nil {
 		return nil, err
 	}
-	out, err := s.begin("assets_" + in.Mode, in.OutDir)
+	out, err := s.begin("assets_"+in.Mode, in.OutDir)
 	if err != nil {
 		return nil, err
 	}

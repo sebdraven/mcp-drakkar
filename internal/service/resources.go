@@ -34,7 +34,7 @@ func (s *Service) Resources(ctx context.Context, in ResourcesInput) (*Envelope, 
 	if err != nil {
 		return nil, err
 	}
-	out, err := s.begin("resources_" + in.Mode, in.OutDir)
+	out, err := s.begin("resources_"+in.Mode, in.OutDir)
 	if err != nil {
 		return nil, err
 	}
