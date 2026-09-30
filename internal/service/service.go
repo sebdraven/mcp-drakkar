@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sebdraven/mcp-drakkar/internal/corpus"
 	"github.com/sebdraven/mcp-drakkar/internal/drakkar"
 	"github.com/sebdraven/mcp-drakkar/internal/version"
 )
@@ -61,19 +60,15 @@ func durationEnv(key string, fallback time.Duration) time.Duration {
 }
 
 type Service struct {
-	scope    *corpus.Scope
 	timeouts Timeouts
 
 	mu      sync.Mutex
 	version string
 }
 
-func New(scope *corpus.Scope, t Timeouts) *Service {
-	return &Service{scope: scope, timeouts: t}
+func New(t Timeouts) *Service {
+	return &Service{timeouts: t}
 }
-
-// Scope exposes the perimeter so the server can report it at startup.
-func (s *Service) Scope() *corpus.Scope { return s.scope }
 
 // timeout picks the class timeout unless the caller overrode it.
 func (s *Service) timeout(class time.Duration, override *int) time.Duration {
@@ -83,23 +78,22 @@ func (s *Service) timeout(class time.Duration, override *int) time.Duration {
 	return class
 }
 
-// begin creates this invocation's output directory. Every mode gets one, even
+// begin prepares this invocation's output directory. Every mode gets one, even
 // the ones that write nothing, so that a report always has somewhere to land.
-func (s *Service) begin(tool string) (*corpus.Run, error) {
-	return s.scope.NewRun(tool)
+func (s *Service) begin(tool, requested string) (*outDir, error) {
+	return newOutDir(tool, requested)
 }
 
-// invoke runs the assembled command line with the run directory as the child's
-// working directory, so that a relative path Drakkar defaults to on its own
-// lands there rather than wherever the MCP client happened to start the server.
-func (s *Service) invoke(ctx context.Context, run *corpus.Run, timeout time.Duration, args *drakkar.Args) (*Envelope, *drakkar.Result, error) {
-	return s.invokeIn(ctx, run.Dir, timeout, args)
+// invoke runs the assembled command line with the output directory as the
+// child's working directory, so that a relative path Drakkar defaults to on its
+// own lands somewhere named rather than wherever the MCP client happened to
+// start the server.
+func (s *Service) invoke(ctx context.Context, out *outDir, timeout time.Duration, args *drakkar.Args) (*Envelope, *drakkar.Result, error) {
+	return s.invokeIn(ctx, out.path, timeout, args)
 }
 
-// invokeIn is the same for the two modes that need no output directory at all,
-// and must therefore keep working when none is configured: --version and
-// --legend. Being able to ask what is wired up is most useful precisely when
-// nothing is.
+// invokeIn is the same for the two modes that need no output directory at all:
+// --version and --legend. Neither writes anything, so neither creates one.
 func (s *Service) invokeIn(ctx context.Context, workDir string, timeout time.Duration, args *drakkar.Args) (*Envelope, *drakkar.Result, error) {
 	argv, err := args.Argv()
 	if err != nil {
@@ -190,7 +184,7 @@ func (s *Service) finishJSON(env *Envelope, path, rootName string, inline []stri
 // finishJSONStdout is the same, for the one mode that prints its JSON instead of
 // writing it: the rules pipeline. The document is written out here so that a
 // report path exists for it too.
-func (s *Service) finishJSONStdout(env *Envelope, run *corpus.Run, stdout []byte, rootName string, inline []string, maxRows int) error {
+func (s *Service) finishJSONStdout(env *Envelope, out *outDir, stdout []byte, rootName string, inline []string, maxRows int) error {
 	if len(strings.TrimSpace(string(stdout))) == 0 {
 		env.note("nothing on stdout")
 		return nil
@@ -199,7 +193,7 @@ func (s *Service) finishJSONStdout(env *Envelope, run *corpus.Run, stdout []byte
 	if err := json.Unmarshal(stdout, &doc); err != nil {
 		return fmt.Errorf("parsing the JSON Drakkar printed: %w", err)
 	}
-	path, err := run.Path("report.json")
+	path, err := out.file("report.json")
 	if err != nil {
 		return err
 	}
@@ -217,7 +211,7 @@ func (s *Service) finishJSONStdout(env *Envelope, run *corpus.Run, stdout []byte
 
 // finishTable parses a TSV stdout, writes the whole row set to disk and puts a
 // declared preview in the envelope.
-func (s *Service) finishTable(env *Envelope, run *corpus.Run, stdout []byte, maxRows int) (*drakkar.Table, error) {
+func (s *Service) finishTable(env *Envelope, out *outDir, stdout []byte, maxRows int) (*drakkar.Table, error) {
 	table, err := drakkar.ParseTable(stdout)
 	if err != nil {
 		env.note(fmt.Sprintf("no table could be read from stdout: %v", err))
@@ -225,7 +219,7 @@ func (s *Service) finishTable(env *Envelope, run *corpus.Run, stdout []byte, max
 	}
 	objects := table.Objects()
 
-	path, err := run.Path("rows.json")
+	path, err := out.file("rows.json")
 	if err != nil {
 		return nil, err
 	}
@@ -261,9 +255,9 @@ func (s *Service) finishTable(env *Envelope, run *corpus.Run, stdout []byte, max
 }
 
 // finishLines handles the one output that is a bare list with no header.
-func (s *Service) finishLines(env *Envelope, run *corpus.Run, stdout []byte, maxRows int) error {
+func (s *Service) finishLines(env *Envelope, out *outDir, stdout []byte, maxRows int) error {
 	lines := drakkar.ParseLines(stdout)
-	path, err := run.Path("lines.json")
+	path, err := out.file("lines.json")
 	if err != nil {
 		return err
 	}
@@ -290,9 +284,9 @@ func (s *Service) finishLines(env *Envelope, run *corpus.Run, stdout []byte, max
 
 // finishText keeps a text-only mode's stdout: written to disk in full, and
 // returned inline only up to a ceiling, declared.
-func (s *Service) finishText(env *Envelope, run *corpus.Run, stdout []byte) error {
+func (s *Service) finishText(env *Envelope, out *outDir, stdout []byte) error {
 	const inlineTextMax = 64 << 10
-	path, err := run.Path("output.txt")
+	path, err := out.file("output.txt")
 	if err != nil {
 		return err
 	}
