@@ -195,3 +195,124 @@ func TestOutDirRefusesAnythingButAPlainFileName(t *testing.T) {
 		}
 	}
 }
+
+// The shape of an --api-surface report: the root is an array even for a single
+// sample, and every counter lives inside an entry rather than at the root. That
+// is why this mode needs a finisher of its own.
+const apiSurfaceReport = `[
+  {
+    "sample": "cdc1a0b585d169e862d637e0152268cafd9ed55d71de6cf86f4bd551c989f5a9",
+    "report": {
+      "routes": [
+        {"class": "Lcom/dri/agent/UserApi;", "method": "approve", "verb": "POST",
+         "path": "/v1/users/auth/passwordless/{token}/approve", "visibility": "runtime"},
+        {"class": "Lcom/dri/agent/DeviceApi;", "method": "list", "verb": "GET",
+         "path": "/v1/devices", "visibility": "runtime"},
+        {"class": "Lcom/dri/agent/BrandApi;", "method": "raw", "verb": null,
+         "path": null, "visibility": ""}
+      ],
+      "fields": [
+        {"class": "Lcom/dri/agent/model/Device;", "field": "a", "serialized": "device_id"}
+      ],
+      "stats": {"classes": 4000, "routes": 2, "annotations_seen": 5200, "other_annotations": 5100}
+    }
+  }
+]`
+
+func writeReport(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "report.json")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestAPISurfaceHeadCarriesTheCountersAndTheArraysBecomeTails(t *testing.T) {
+	s, _ := testService(t)
+	env := &Envelope{}
+	if err := s.finishAPISurface(env, writeReport(t, apiSurfaceReport), 50); err != nil {
+		t.Fatal(err)
+	}
+
+	head, ok := env.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("head is %T, want an object", env.Result)
+	}
+	if head["routes_total"] != 3 || head["fields_total"] != 1 {
+		t.Errorf("totals are %v / %v, want 3 / 1", head["routes_total"], head["fields_total"])
+	}
+
+	// other_annotations is the counter that separates "no annotations here" from
+	// "thousands, none of them a route". Losing it is the whole reason this mode
+	// does not go through finishTable.
+	stats, ok := head["stats"].(map[string]float64)
+	if !ok {
+		t.Fatalf("stats is %T, want the summed counters", head["stats"])
+	}
+	if stats["other_annotations"] != 5100 {
+		t.Errorf("other_annotations = %v, want 5100", stats["other_annotations"])
+	}
+
+	verbs, ok := head["per_verb"].(map[string]int)
+	if !ok {
+		t.Fatalf("per_verb is %T", head["per_verb"])
+	}
+	// The third route has no verb: it carries parameter annotations only, and
+	// stats.params_only_methods is what counts it.
+	if len(verbs) != 2 || verbs["POST"] != 1 || verbs["GET"] != 1 {
+		t.Errorf("per_verb = %v, want one POST and one GET", verbs)
+	}
+
+	if env.Tails["routes"].Total != 3 || env.Tails["fields"].Total != 1 {
+		t.Errorf("tails are %+v", env.Tails)
+	}
+	// A single sample must not be flattened into anonymity: the preview says
+	// which sample each row came from, the way the TSV column does.
+	first, ok := env.Tails["routes"].Items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("tail item is %T", env.Tails["routes"].Items[0])
+	}
+	if first["sample"] != "cdc1a0b585d169e862d637e0152268cafd9ed55d71de6cf86f4bd551c989f5a9" {
+		t.Errorf("the whole sample name should be on the row, got %v", first["sample"])
+	}
+}
+
+func TestAPISurfaceSumsUnknownCountersAcrossSamples(t *testing.T) {
+	// A counter this server has never heard of still reaches the head: the stats
+	// object is summed key by key, so a counter added upstream needs no change
+	// here.
+	const twoSamples = `[
+  {"sample": "a", "report": {"routes": [], "fields": [], "stats": {"routes": 1, "brand_new": 7}}},
+  {"sample": "b", "report": {"routes": [], "fields": [], "stats": {"routes": 2, "brand_new": 5}}}
+]`
+	s, _ := testService(t)
+	env := &Envelope{}
+	if err := s.finishAPISurface(env, writeReport(t, twoSamples), 50); err != nil {
+		t.Fatal(err)
+	}
+	head := env.Result.(map[string]any)
+	stats := head["stats"].(map[string]float64)
+	if stats["brand_new"] != 12 || stats["routes"] != 3 {
+		t.Errorf("stats = %v, want brand_new 12 and routes 3", stats)
+	}
+	if head["samples"] != 2 {
+		t.Errorf("samples = %v, want 2", head["samples"])
+	}
+	if _, ok := head["per_sample"]; !ok {
+		t.Error("per_sample should be present in bulk")
+	}
+}
+
+func TestAPISurfaceSaysAnEmptyAnswerIsNotAnAbsenceOfRoutes(t *testing.T) {
+	const noRoutes = `[{"sample": "a", "report": {"routes": [], "fields": [], "stats": {}}}]`
+	s, _ := testService(t)
+	env := &Envelope{}
+	if err := s.finishAPISurface(env, writeReport(t, noRoutes), 50); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(env.Notes, " ")
+	if !strings.Contains(joined, "repackaged") {
+		t.Errorf("an empty answer must be explained, notes were %v", env.Notes)
+	}
+}
