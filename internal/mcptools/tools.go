@@ -20,7 +20,7 @@ import (
 )
 
 // Instructions is handed to the client once, so that the envelope contract and
-// the path rules are not repeated in twenty-two descriptions.
+// the path rules are not repeated in twenty-three descriptions.
 const Instructions = `Drakkar is a static analysis engine for Android APKs and raw DEX files. Every tool here runs the drakkar binary found on PATH; this server never builds, installs or downloads it.
 
 Paths are parameters, given per call, and must be absolute — a relative one would be resolved against a working directory nobody chose. There is nothing to configure and no directory to declare in advance.
@@ -113,6 +113,13 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"The decrypt-const to runtime ratio is what says whether a replayable deobfuscation pass is worth building. " +
 			"Every category is reported even at zero, so counts stay comparable between samples.",
 	}, r.reflectionInputs)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_api_surface",
+		Description: "Read the network protocol the sample DECLARES: the HTTP verb and route template of each Retrofit method, the names its @Path, @Query, @Body, @Header, @Field and @Part parameters bind to, and the wire key of each Gson @SerializedName field. " +
+			"This reads annotations and no instruction at all, so it sees what no bytecode sweep reaches — on a Retrofit client the routes exist only here — and misses what is built at runtime, which is drakkar_strings' half of the job. " +
+			"An empty answer means not Retrofit, or Retrofit repackaged under another package name; it never means the sample has no HTTP routes. Weigh other_annotations against annotations_seen in the head to tell those two apart.",
+	}, r.apiSurface)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_orphan_audit",
@@ -244,6 +251,11 @@ func (r *registry) dynEntrypoints(ctx context.Context, _ *mcp.CallToolRequest, i
 
 func (r *registry) reflectionInputs(ctx context.Context, _ *mcp.CallToolRequest, in service.ReflectionInputsInput) (*mcp.CallToolResult, *service.Envelope, error) {
 	env, err := r.svc.ReflectionInputs(ctx, in)
+	return nil, env, err
+}
+
+func (r *registry) apiSurface(ctx context.Context, _ *mcp.CallToolRequest, in service.APISurfaceInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	env, err := r.svc.APISurface(ctx, in)
 	return nil, env, err
 }
 
