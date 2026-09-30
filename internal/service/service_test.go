@@ -7,42 +7,30 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/sebdraven/mcp-drakkar/internal/corpus"
 )
 
+// The service needs no configuration now, so the helper only provides a
+// directory to build absolute paths from.
 func testService(t *testing.T) (*Service, string) {
 	t.Helper()
-	base := t.TempDir()
-	root := filepath.Join(base, "corpus")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "a.apk"), []byte("PK"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	reports := filepath.Join(base, "reports")
-	if err := os.MkdirAll(reports, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return New(corpus.New([]string{root}, reports), DefaultTimeouts()), root
+	return New(DefaultTimeouts()), t.TempDir()
 }
 
 func TestSingleOrBulkRequiresExactlyOne(t *testing.T) {
-	s, root := testService(t)
-	apk := filepath.Join(root, "a.apk")
+	s, base := testService(t)
+	apk := filepath.Join(base, "a.apk")
 
 	if _, _, err := s.resolveSingleOrBulk("", ""); err == nil {
 		t.Error("neither input was given and it was accepted")
 	}
-	if _, _, err := s.resolveSingleOrBulk(apk, root); err == nil {
+	if _, _, err := s.resolveSingleOrBulk(apk, base); err == nil {
 		t.Error("both inputs were given and it was accepted")
 	}
 	file, dir, err := s.resolveSingleOrBulk(apk, "")
 	if err != nil || file == "" || dir != "" {
 		t.Errorf("single input: file=%q dir=%q err=%v", file, dir, err)
 	}
-	file, dir, err = s.resolveSingleOrBulk("", root)
+	file, dir, err = s.resolveSingleOrBulk("", base)
 	if err != nil || dir == "" || file != "" {
 		t.Errorf("bulk input: file=%q dir=%q err=%v", file, dir, err)
 	}
@@ -114,8 +102,8 @@ func TestTimeoutsFromEnv(t *testing.T) {
 }
 
 func TestUnknownModesAreRefusedBeforeAnythingRuns(t *testing.T) {
-	s, root := testService(t)
-	apk := filepath.Join(root, "a.apk")
+	s, base := testService(t)
+	apk := filepath.Join(base, "a.apk")
 
 	if _, err := s.Resources(context.Background(), ResourcesInput{APK: apk, Mode: "sideways"}); err == nil {
 		t.Error("an unknown resources mode was accepted")
@@ -128,34 +116,82 @@ func TestUnknownModesAreRefusedBeforeAnythingRuns(t *testing.T) {
 	}
 }
 
-func TestPathsOutsideTheCorpusNeverReachDrakkar(t *testing.T) {
+func TestRelativePathsAreRefused(t *testing.T) {
+	// Any absolute path is fair game — there is no perimeter. A relative one is
+	// not, because it would resolve against the child's working directory, which
+	// is this call's output directory and not the caller's shell.
 	s, _ := testService(t)
 
-	if _, err := s.Manifest(context.Background(), InventoryInput{APK: "/etc/hosts"}); err == nil {
-		t.Error("a path outside the corpus was accepted")
+	if _, err := s.Manifest(context.Background(), InventoryInput{APK: "sample.apk"}); err == nil {
+		t.Error("a relative input was accepted")
 	}
-	if _, err := s.DiffDex(context.Background(), DiffDexInput{A: "/etc/hosts", B: "/etc/passwd"}); err == nil {
-		t.Error("two paths outside the corpus were accepted")
+	if _, err := s.DiffDex(context.Background(), DiffDexInput{A: "a.apk", B: "/tmp/b.apk"}); err == nil {
+		t.Error("a relative first input was accepted")
+	}
+	if _, err := s.DiffMatrix(context.Background(), DiffMatrixInput{Directory: "./corpus"}); err == nil {
+		t.Error("a relative directory was accepted")
+	}
+	if _, err := s.Strings(context.Background(), StringsInput{Input: "/abs/a.apk", OutDir: "relative/out"}); err == nil {
+		t.Error("a relative out_dir was accepted")
 	}
 }
 
-func TestModeValidationHappensBeforeTheRunDirectory(t *testing.T) {
-	// A bad mode must not leave an empty run directory behind.
-	s, root := testService(t)
-	reports, err := s.Scope().ReportsDir()
+func TestOutDirIsHonouredWhenGiven(t *testing.T) {
+	s, base := testService(t)
+	want := filepath.Join(base, "chosen", "nested")
+
+	out, err := s.begin("t", want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Assets(context.Background(), AssetsInput{APK: filepath.Join(root, "a.apk"), Mode: "sideways"}); err == nil {
-		t.Fatal("an unknown mode was accepted")
+	if out.path != want {
+		t.Errorf("out.path = %q, want %q", out.path, want)
 	}
-	entries, err := os.ReadDir(reports)
+	if info, err := os.Stat(want); err != nil || !info.IsDir() {
+		t.Errorf("the directory was not created: %v", err)
+	}
+}
+
+func TestOmittedOutDirFallsBackToATemporaryDirectory(t *testing.T) {
+	// Drakkar's own --out defaults to ./reports, relative to a working directory
+	// nobody chose. The fallback has to be absolute and it has to be reportable.
+	s, _ := testService(t)
+
+	out, err := s.begin("diff_dex", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// One directory is created before the mode switch, which is acceptable; more
-	// than one would mean the switch ran twice.
-	if len(entries) > 1 {
-		t.Errorf("%d run directories left behind", len(entries))
+	t.Cleanup(func() { _ = os.RemoveAll(out.path) })
+
+	if !filepath.IsAbs(out.path) {
+		t.Errorf("fallback %q is not absolute", out.path)
+	}
+	if info, err := os.Stat(out.path); err != nil || !info.IsDir() {
+		t.Errorf("the fallback directory was not created: %v", err)
+	}
+
+	second, err := s.begin("diff_dex", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(second.path) })
+	if second.path == out.path {
+		t.Error("two calls shared a directory; one would overwrite the other's report")
+	}
+}
+
+func TestOutDirRefusesAnythingButAPlainFileName(t *testing.T) {
+	s, base := testService(t)
+	out, err := s.begin("t", filepath.Join(base, "out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := out.file("report.json"); err != nil {
+		t.Errorf("a plain name was refused: %v", err)
+	}
+	for _, bad := range []string{"", ".", "..", "sub/report.json", "../escape.json", "/etc/passwd"} {
+		if _, err := out.file(bad); err == nil {
+			t.Errorf("%q was accepted as a file name", bad)
+		}
 	}
 }
