@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -10,14 +11,15 @@ import (
 	"github.com/sebdraven/mcp-drakkar/internal/version"
 )
 
-// VersionInput takes nothing: the point of this tool is that it works before
-// anything is configured.
+// VersionInput takes nothing: this tool needs no configuration, and neither does
+// the server.
 type VersionInput struct{}
 
-// Version reports which Drakkar is on the PATH and what perimeter the server is
-// running with. It exists so that a measurement can be dated — today nothing in
-// a conversation says which Drakkar produced a number — and so that "the binary
-// is missing" is a clear answer rather than a puzzling failure elsewhere.
+// Version reports which Drakkar is on the PATH, the timeouts in force, and where
+// output lands when a call names no directory of its own. It exists so that a
+// measurement can be dated — today nothing in a conversation says which Drakkar
+// produced a number — and so that "the binary is missing" is a clear answer
+// rather than a puzzling failure elsewhere.
 func (s *Service) Version(ctx context.Context, _ VersionInput) (*Envelope, error) {
 	s.RefreshVersion()
 
@@ -34,16 +36,10 @@ func (s *Service) Version(ctx context.Context, _ VersionInput) (*Envelope, error
 		"server_version": version.Version,
 		"server_commit":  version.Commit,
 		"drakkar_tested": version.DrakkarTested,
-		"corpus_dirs":    s.scope.Roots(),
 		"timeouts":       timeouts,
-	}
-	if bad := s.scope.BadRoots(); len(bad) > 0 {
-		result["corpus_dirs_unusable"] = bad
-	}
-	if reports, err := s.scope.ReportsDir(); err == nil {
-		result["reports_dir"] = reports
-	} else {
-		result["reports_dir_error"] = err.Error()
+		// Where output lands when a call names no out_dir. There is no configured
+		// perimeter: inputs are absolute paths given per call.
+		"default_out_parent": os.TempDir(),
 	}
 
 	env := &Envelope{
