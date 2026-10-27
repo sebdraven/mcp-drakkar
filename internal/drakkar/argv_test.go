@@ -138,6 +138,24 @@ func TestOptionalWithValues(t *testing.T) {
 	})
 }
 
+func TestOptionalValueIsBareOrAttached(t *testing.T) {
+	argv, err := New().Positional("/corpus/a.apk").OptionalValue("--bundle", "/out").Argv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertArgv(t, argv, []string{"/corpus/a.apk", "--bundle=/out"})
+
+	argv, err = New().Switch("--legend").OptionalValue("--bundle", "").Argv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertArgv(t, argv, []string{"--legend", "--bundle"})
+
+	if _, err := New().Value("--bundle", "/out").Argv(); err == nil {
+		t.Error("--bundle accepted as a plain valued flag")
+	}
+}
+
 func TestEmptyValuesAreRefused(t *testing.T) {
 	if _, err := New().Value("--probe", "").Argv(); err == nil {
 		t.Error("an empty value was accepted")

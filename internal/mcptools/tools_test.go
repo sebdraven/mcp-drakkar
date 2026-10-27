@@ -14,8 +14,12 @@ import (
 var wantTools = []string{
 	"drakkar_api_surface",
 	"drakkar_assets",
+	"drakkar_bundle",
+	"drakkar_bundle_class",
+	"drakkar_bundle_index",
 	"drakkar_cert",
 	"drakkar_dating",
+	"drakkar_decompile",
 	"drakkar_diff_dex",
 	"drakkar_diff_explain",
 	"drakkar_diff_matrix",

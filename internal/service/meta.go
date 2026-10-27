@@ -70,7 +70,7 @@ func (s *Service) Version(ctx context.Context, _ VersionInput) (*Envelope, error
 
 // LegendInput selects which legend to print.
 type LegendInput struct {
-	Topic string `json:"topic" jsonschema:"one of manifest, cert, dating, assets, entries, resources, api_surface, diff_dex, diff_strings, diff_explain, diff_matrix, disasm"`
+	Topic string `json:"topic" jsonschema:"one of manifest, cert, dating, assets, entries, resources, api_surface, diff_dex, diff_strings, diff_explain, diff_matrix, disasm, decompile, bundle"`
 }
 
 // Legend prints Drakkar's own legend for a mode. These texts are what keeps a
@@ -98,6 +98,11 @@ func (s *Service) Legend(ctx context.Context, in LegendInput) (*Envelope, error)
 		args.Switch("--api-surface")
 	case "disasm":
 		args.Optional("--disasm", nil)
+	case "decompile":
+		// --decompile --legend and --bundle --legend print the same text.
+		args.Optional("--decompile", nil)
+	case "bundle":
+		args.OptionalValue("--bundle", "")
 	case "diff_dex":
 		args.Pair("--diff-dex", legendPlaceholder, legendPlaceholder)
 		note = legendPlaceholderNote
@@ -111,13 +116,15 @@ func (s *Service) Legend(ctx context.Context, in LegendInput) (*Envelope, error)
 		args.Value("--diff-matrix", legendPlaceholder)
 		note = legendPlaceholderNote
 	default:
-		return nil, fmt.Errorf("topic %q is not one of manifest, cert, dating, assets, entries, resources, api_surface, diff_dex, diff_strings, diff_explain, diff_matrix, disasm", in.Topic)
+		return nil, fmt.Errorf("topic %q is not one of manifest, cert, dating, assets, entries, resources, api_surface, diff_dex, diff_strings, diff_explain, diff_matrix, disasm, decompile, bundle", in.Topic)
 	}
 
 	env, res, err := s.invokeIn(ctx, "", 30*time.Second, args)
 	if err != nil {
 		return nil, err
 	}
+	unknownFlagNote(env, "--decompile")
+	unknownFlagNote(env, "--bundle")
 	env.Result = map[string]any{
 		"topic": in.Topic,
 		"text":  string(res.Stdout),

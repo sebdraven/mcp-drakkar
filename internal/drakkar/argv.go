@@ -161,6 +161,20 @@ func (a *Args) Optional(name string, vs []string) *Args {
 	return a
 }
 
+// OptionalValue adds a flag declared num_args(0..=1): bare when v is empty,
+// --name=v otherwise. `--bundle` bare is only meaningful with --legend.
+func (a *Args) OptionalValue(name, v string) *Args {
+	if !a.check(name, optionalValueFlag) {
+		return a
+	}
+	if v == "" {
+		a.flags = append(a.flags, name)
+		return a
+	}
+	a.flags = append(a.flags, name+"="+v)
+	return a
+}
+
 // Pair adds a flag declared num_args(2). It consumes exactly two operands, so
 // the attached-value rule does not apply and cannot.
 func (a *Args) Pair(name, first, second string) *Args {

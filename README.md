@@ -63,6 +63,10 @@ refuses with the same message.
 | `drakkar_native_arch` | ABI, word size and machine of each `.so` under `lib/` |
 | `drakkar_strings` | the DEX string pool, whole or filtered |
 | `drakkar_disasm` | selected classes disassembled with operands resolved |
+| `drakkar_decompile` | selected classes decompiled to Java by dex-decompiler, to check against `drakkar_disasm` |
+| `drakkar_bundle` | everything Drakkar extracts from one sample, every class disassembled and decompiled, under `OUT/<sha256>/` |
+| `drakkar_bundle_index` | the classes of a bundle, filtered — the tool for choosing what to read |
+| `drakkar_bundle_class` | one class of a bundle: whole-class Java, per-method Java, `.dasm`, per-method records |
 | `drakkar_dyn_entrypoints` | components reached other than by a manifest declaration |
 | `drakkar_reflection_inputs` | where the name of each reflection target comes from |
 | `drakkar_api_surface` | the protocol the sample declares: Retrofit verbs and routes, `@Path`/`@Query` names, Gson `@SerializedName` keys |
@@ -90,6 +94,38 @@ The three inventories are *not* merged despite sharing a branch upstream: their
 report shapes have no field in common, and each carries a different caveat that
 belongs in its own description. A description covering three semantics warns
 about none of them.
+
+### Reading a sample through its bundle
+
+`drakkar_decompile` and `drakkar_bundle` need Drakkar 0.2.0; against an older
+one they refuse with a message saying so. `drakkar_bundle` is the one tool whose
+`out_dir` is required: the bundle is a deliverable, written to
+`OUT/<sha256 of the input>/`, never to a temporary directory. The two readers run
+no analysis — they read that directory, and call nothing but `drakkar --version`,
+to refuse alongside the others when the Drakkar on `PATH` predates 0.2.0.
+
+An agent that has to go through a sample does it in three steps:
+
+```text
+1. drakkar_bundle        {"input": "/corpus/sample.apk", "out_dir": "/cases/2026-10/bundles"}
+   → result.bundle_dir = /cases/2026-10/bundles/<sha256>
+     result.bundle, errors_total, per_origin, per_decompile_status, tails.errors
+
+2. drakkar_bundle_index  {"bundle_dir": "/cases/2026-10/bundles/<sha256>",
+                          "has_rules_direct": true, "origin": "app"}
+   → tails.classes: the application classes a rule cites directly
+
+3. drakkar_bundle_class  {"bundle_dir": "/cases/2026-10/bundles/<sha256>", "id": 42}
+   → result.class, result.parts.{class_java, java, dasm, methods}, result.errors
+```
+
+Prioritise on `rules_direct`, never on `rules_path`: a rule's path starts at an
+entry point or at a rule's pivot, so `rules_path` cites every class it traverses.
+`origin: app` is over-inclusive — a library missing from Drakkar's exclusion
+list, or renamed by ProGuard, counts as app. And the Java is read against the
+`.dasm`: dex-decompiler is young, and a decompile status of `ok` does not
+guarantee fidelity. `drakkar_legend` with topic `bundle` defines every file and
+field.
 
 ## The answer
 
@@ -167,8 +203,9 @@ terminal, and it never is here. One fewer duplicated default.
   every pair regardless. Exposing it would imply a bound on the answer that it
   does not place.
 
-`drakkar_scan` is the one tool that reaches the network: the rule engine loads the
-MITRE catalogue, and a first call after a cache miss downloads it.
+`drakkar_scan` and `drakkar_bundle` are the two tools that reach the network: the
+rule engine loads the MITRE catalogue, and a first call after a cache miss
+downloads it.
 
 ## Layout
 
@@ -178,7 +215,7 @@ internal/drakkar/     the flag whitelist, the argv builder, the runner, the stde
                       marker parser, the TSV parsers
 internal/service/     one mode to one answer: output directory, head/tail split,
                       declared truncation, report writing
-internal/mcptools/    the 23 tools and their typed inputs
+internal/mcptools/    the 27 tools and their typed inputs
 internal/version/     what the server declares about itself
 ```
 
@@ -203,11 +240,11 @@ Nothing travels alongside the binary, so the binary answers for itself:
 
 ```
 $ mcp-drakkar -version
-mcp-drakkar 0.1.0
+mcp-drakkar 0.4.0
 commit:         <the full commit, injected at link time>
 target:         darwin/arm64
 go:             go1.27.1
-drakkar tested: 0.1.0 (9f2adda)
+drakkar tested: 0.2.0 (01eee3b6b8acf75bb15dd90e2ee5e301c1f90d21)
 ```
 
 Only the commit is injected. `Version` and `DrakkarTested` are constants in
