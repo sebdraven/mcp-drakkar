@@ -20,7 +20,7 @@ import (
 )
 
 // Instructions is handed to the client once, so that the envelope contract and
-// the path rules are not repeated in twenty-three descriptions.
+// the path rules are not repeated in twenty-seven descriptions.
 const Instructions = `Drakkar is a static analysis engine for Android APKs and raw DEX files. Every tool here runs the drakkar binary found on PATH; this server never builds, installs or downloads it.
 
 Paths are parameters, given per call, and must be absolute — a relative one would be resolved against a working directory nobody chose. There is nothing to configure and no directory to declare in advance.
@@ -99,6 +99,37 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"This is the complement to drakkar_diff_dex, which is blind to operands. It is not a decompiler: no control flow is reconstructed and no types are inferred. " +
 			"Text output, one sample at a time, meant to be read and diffed as it stands.",
 	}, r.disasm)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_decompile",
+		Description: "Decompile to Java the classes whose Dalvik descriptor matches a pattern — the same case-insensitive substring selection as drakkar_disasm, every class when no pattern is given. Accepts an APK or a raw DEX recognised by content. " +
+			"The Java comes from dex-decompiler, a young decompiler: when a line matters, check it against drakkar_disasm, which shows the bytecode with operands resolved. " +
+			"A class headed `// repli méthode par méthode` is one where decompile_class failed: what follows is the per-method rendering, without fields, imports or inner classes, and stderr counts them. " +
+			"The whole Java is written to decompiled.java; only max_chars of it come back inline. Needs Drakkar 0.2.0.",
+	}, r.decompile)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_bundle",
+		Description: "Write the bundle of one APK or raw DEX to out_dir/<sha256 of the input>/: manifest, signature, dating, rule matches, string pool and static values, dynamic entry points, and every class disassembled and decompiled, libraries included, one set of files per class id. " +
+			"The answer is bundle.json whole, the count and a preview of errors.json, and the classes of index.json counted by origin, decompile_status and class_java; read the classes themselves with drakkar_bundle_index, then drakkar_bundle_class. " +
+			"out_dir is required, and an existing bundle of the same input is refused unless overwrite is set. Like drakkar_scan it loads the MITRE catalogue, so a first call after a cache miss reaches the network. A part that fails is null in its file and recorded in errors.json rather than stopping the bundle. " +
+			"drakkar_legend with topic bundle defines every file and field. Needs Drakkar 0.2.0.",
+	}, r.bundle)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_bundle_index",
+		Description: "List the classes of a bundle written by drakkar_bundle, from its index.json, filtered by origin, decompile_status, class_java, package prefix and whether a rule cites the class directly. Runs no analysis. " +
+			"This is how to choose what to read next with drakkar_bundle_class. Prioritise with rules_direct: a rule's evidence names the class's descriptor, or the class owns the immediate caller of the API in an evidence path. " +
+			"rules_path does not prioritise: a path starts at an entry point or a rule's pivot, so it cites every class traversed on the way. " +
+			"origin app is over-inclusive — a library missing from Drakkar's exclusion list, or renamed by ProGuard, counts as app.",
+	}, r.bundleIndex)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_bundle_class",
+		Description: "Read one class of a bundle written by drakkar_bundle, by id or by exact descriptor, without running an analysis: its index.json entry, then classes/<id>.class.java (the whole class, absent when decompile_class failed), classes/<id>.java (method by method, the file java_lines points into), classes/<id>.dasm (the bytecode, in drakkar_disasm's format) and classes/<id>.json (one record per method: status, fallback markers, line spans). " +
+			"Each part is cut at max_chars and names its full file; the errors.json entries for the class come with it. " +
+			"Read the Java as an aid from a young decompiler and the .dasm as the reference.",
+	}, r.bundleClass)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_dyn_entrypoints",
@@ -199,7 +230,7 @@ func Register(s *mcp.Server, svc *service.Service) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_scan",
 		Description: "Run the rule engine and return the MITRE ATT&CK for Mobile detections. One APK, or a whole directory with one report per sample. " +
-			"Unlike every other tool here this one loads the MITRE catalogue, so a first call after a cache miss reaches the network; refresh forces that download. " +
+			"Unlike every other tool here but drakkar_bundle, this one loads the MITRE catalogue, so a first call after a cache miss reaches the network; refresh forces that download. " +
 			"It is the heaviest mode: the inventory and measurement tools answer most questions without building the call graph.",
 	}, r.scan)
 }
@@ -241,6 +272,26 @@ func (r *registry) strings(ctx context.Context, _ *mcp.CallToolRequest, in servi
 
 func (r *registry) disasm(ctx context.Context, _ *mcp.CallToolRequest, in service.DisasmInput) (*mcp.CallToolResult, *service.Envelope, error) {
 	env, err := r.svc.Disasm(ctx, in)
+	return nil, env, err
+}
+
+func (r *registry) decompile(ctx context.Context, _ *mcp.CallToolRequest, in service.DecompileInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	env, err := r.svc.Decompile(ctx, in)
+	return nil, env, err
+}
+
+func (r *registry) bundle(ctx context.Context, _ *mcp.CallToolRequest, in service.BundleInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	env, err := r.svc.Bundle(ctx, in)
+	return nil, env, err
+}
+
+func (r *registry) bundleIndex(ctx context.Context, _ *mcp.CallToolRequest, in service.BundleIndexInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	env, err := r.svc.BundleIndex(ctx, in)
+	return nil, env, err
+}
+
+func (r *registry) bundleClass(ctx context.Context, _ *mcp.CallToolRequest, in service.BundleClassInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	env, err := r.svc.BundleClass(ctx, in)
 	return nil, env, err
 }
 
