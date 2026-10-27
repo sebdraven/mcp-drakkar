@@ -1,7 +1,7 @@
 package drakkar
 
 // The flag table mirrors the clap `Cli` struct of drakkar/src/main.rs at
-// f5237b9573ed85307d0d0f404d8a03a7312e9fdc, and it is the whitelist: Args
+// 01eee3b6b8acf75bb15dd90e2ee5e301c1f90d21 (v0.2.0), and it is the whitelist: Args
 // refuses any name absent from it, so a flag this table does not know cannot
 // reach the command line. A parameter that maps to no known flag is an error,
 // never a passthrough.
@@ -24,6 +24,8 @@ const (
 	pairFlag
 	// optionalMultiFlag takes zero or more values: bare, or repeated --name=value
 	optionalMultiFlag
+	// optionalValueFlag takes zero or one value: bare, or --name=value
+	optionalValueFlag
 )
 
 // known is built by assignment rather than as a literal so that no column
@@ -81,6 +83,10 @@ func init() {
 	known["--disasm"] = optionalMultiFlag
 	known["--disasm-normalize"] = multiFlag
 	known["--api-surface"] = switchFlag
+
+	// Decompilation and bundle, since 0.2.0
+	known["--decompile"] = optionalMultiFlag
+	known["--bundle"] = optionalValueFlag
 
 	// Resources
 	known["--resource"] = multiFlag
