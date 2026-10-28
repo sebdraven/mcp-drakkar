@@ -413,7 +413,7 @@ func TestNativeDisasmHeadCounters(t *testing.T) {
 func TestNativeDisasmFunctionRows(t *testing.T) {
 	env := finishNativeDisasmFixture(t, nativeDisasmReportBody, 50)
 	tail := env.Tails["disasm_functions"]
-	if tail.Total != 3 || tail.Returned != 3 || tail.Truncated {
+	if tail.Total != 5 || tail.Returned != 5 || tail.Truncated {
 		t.Fatalf("disasm_functions tail = %+v", tail)
 	}
 	row := tail.Items[0].(map[string]any)
@@ -456,7 +456,10 @@ func TestNativeDisasmFunctionRows(t *testing.T) {
 		t.Errorf("string_refs = %d of %v, want 20 of 25", len(refs), row["string_refs_total"])
 	}
 
-	asset := tail.Items[2].(map[string]any)
+	if total := tail.Items[2].(map[string]any); total["row"] != "elf_total" || total["elf"] != "lib/arm64-v8a/libfoo.so" || total["invalid_paths_count"] != nil {
+		t.Errorf("lib total row = %v, want invalid_paths_count null when Drakkar does not report it", total)
+	}
+	asset := tail.Items[3].(map[string]any)
 	if asset["elf_sha256"] != nativeAssetSHA || asset["origin"] != "init_array" {
 		t.Errorf("asset row = %v", asset)
 	}
@@ -495,7 +498,7 @@ func TestNativeDisasmUpcallsAndRegisteredByCode(t *testing.T) {
 func TestNativeMaxRowsCapsDisasmFunctions(t *testing.T) {
 	env := finishNativeDisasmFixture(t, nativeDisasmReportBody, 2)
 	f := env.Tails["disasm_functions"]
-	if f.Total != 3 || f.Returned != 2 || !f.Truncated {
+	if f.Total != 5 || f.Returned != 2 || !f.Truncated {
 		t.Errorf("disasm_functions tail = %+v", f)
 	}
 	if u := env.Tails["upcalls"]; u.Total != 3 || u.Returned != 3 || u.Truncated {
