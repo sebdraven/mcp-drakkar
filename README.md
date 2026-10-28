@@ -60,6 +60,7 @@ refuses with the same message.
 | `drakkar_manifest` | permissions, components, intent filters, derived entry points |
 | `drakkar_cert` | signature schemes v1/v2/v3/v3.1 and the X.509 certificates |
 | `drakkar_dating` | raw dating indicators — no date is ever estimated |
+| `drakkar_native` | every ELF found by content, its JNI exports and tables, and the binding of DEX native methods to them |
 | `drakkar_native_arch` | ABI, word size and machine of each `.so` under `lib/` |
 | `drakkar_strings` | the DEX string pool, whole or filtered |
 | `drakkar_disasm` | selected classes disassembled with operands resolved |
@@ -215,7 +216,7 @@ internal/drakkar/     the flag whitelist, the argv builder, the runner, the stde
                       marker parser, the TSV parsers
 internal/service/     one mode to one answer: output directory, head/tail split,
                       declared truncation, report writing
-internal/mcptools/    the 27 tools and their typed inputs
+internal/mcptools/    the 28 tools and their typed inputs
 internal/version/     what the server declares about itself
 ```
 
@@ -269,6 +270,18 @@ It starts **advisory**: `--no-exit-codes` makes zizmor exit 0 even with findings
 so the job is green on purpose rather than through a `continue-on-error` that is
 easy to forget to remove. Turning it blocking is deleting one flag. Its report goes
 to the job summary, not just the logs.
+
+## Git hooks
+
+`.githooks/pre-commit` and `.githooks/pre-push` run the lint steps of
+`ci.yml` as they stand there: `gofmt -l ./cmd ./internal`, then `go vet ./...`.
+Enable them once per clone:
+
+```
+git config core.hooksPath .githooks
+```
+
+When gofmt fails, run `gofmt -w .` and commit again.
 
 ## Licence
 
