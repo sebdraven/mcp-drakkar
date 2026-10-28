@@ -56,11 +56,11 @@ refuses with the same message.
 | Tool | What it answers |
 |---|---|
 | `drakkar_version` | which Drakkar is in use, which one this server was written against, the timeouts, and where output lands by default |
-| `drakkar_legend` | Drakkar's own legend for a mode: where a metric's limits are stated; topic `native` also returns `terms`, the definitions of `invalid_path` and `opaque_dead_code` |
+| `drakkar_legend` | Drakkar's own legend for a mode: where a metric's limits are stated; topic `native` covers `drakkar_native`, including its disasm labels |
 | `drakkar_manifest` | permissions, components, intent filters, derived entry points |
 | `drakkar_cert` | signature schemes v1/v2/v3/v3.1 and the X.509 certificates |
 | `drakkar_dating` | raw dating indicators — no date is ever estimated |
-| `drakkar_native` | every ELF found by content, its JNI exports and tables, and the binding of DEX native methods to them; with `disasm`, the static disassembly of every JNI-bound function, `JNI_OnLoad` and the `init_array` constructors — JNIEnv calls decoded, PLT imports called, strings referenced — bounded by `disasm_depth` (0–3) and `disasm_max_insns` (1–20000), instructions left in `report.json`; each function row counts its `invalid_paths` (code paths abandoned on an undecodable instruction, typically junk bytes behind an opaque predicate) and each ELF closes with an `elf_total` row carrying `invalid_paths_count` |
+| `drakkar_native` | every ELF found by content, its JNI exports and tables, and the binding of DEX native methods to them; with `disasm`, the static disassembly of every JNI-bound function, `JNI_OnLoad` and the `init_array` constructors — JNIEnv calls decoded, PLT imports called, strings referenced — bounded by `disasm_depth` (0–3) and `disasm_max_insns` (1–20000), instructions left in `report.json`; each `disasm_functions` row counts its `invalid_paths` and each `elfs` row carries `invalid_paths_count` (null without `disasm` or before Drakkar 0.2.3), both defined by `drakkar_legend` topic `native` |
 | `drakkar_native_arch` | ABI, word size and machine of each `.so` under `lib/` |
 | `drakkar_strings` | the DEX string pool, whole or filtered |
 | `drakkar_disasm` | selected classes disassembled with operands resolved |
