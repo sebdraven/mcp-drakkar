@@ -61,6 +61,10 @@ func init() {
 	known["--native-arch"] = switchFlag
 	// --native: Drakkar main 7445743ff1c9df6ed781b703f2e6a887597cb023, not yet in a tag
 	known["--native"] = switchFlag
+	// --native-disasm and its bounds: Drakkar branch feat/native-disasm, not yet merged
+	known["--native-disasm"] = switchFlag
+	known["--disasm-depth"] = valueFlag
+	known["--disasm-max-insns"] = valueFlag
 	known["--extract-libs"] = switchFlag
 	known["--list-entries"] = switchFlag
 	known["--extract-entry"] = multiFlag
