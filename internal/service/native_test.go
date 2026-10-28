@@ -553,3 +553,62 @@ func TestNativeNotesADrakkarThatPredatesNativeDisasm(t *testing.T) {
 		t.Errorf("notes = %v", env.Notes)
 	}
 }
+
+// One function with two invalid paths, as Drakkar 0.2.3 writes it.
+var nativeInvalidPathsReportBody = `{
+  "sha256": "` + nativeAPKSHA + `",
+  "elfs": [
+    {"path": "lib/armeabi-v7a/libobf.so", "origin": "lib", "sha256": "` + nativeLibSHA + `",
+     "machine": "arm", "bits": 32, "elf_type": "dyn", "stripped": true, "anomalies": [],
+     "jni": {"jni_onload": true, "jni_registration": "none", "static_exports": [], "registered": []},
+     "disasm": {
+       "functions": [
+         {"origin": "jni_onload", "address": "0x4000", "disasm_status": "ok", "truncated": false, "truncated_reason": null,
+          "invalid_paths": [
+            {"address": "0x4010", "bytes": "ffffffff", "reason": "invalid_instruction", "reached_from": "0x400c"},
+            {"address": "0x4030", "bytes": "ffde", "reason": "invalid_instruction", "reached_from": "0x4024"}
+          ],
+          "instructions": [{"address": "0x4000", "bytes": "7047", "mnemonic": "bx", "operands": "lr"}],
+          "calls": [], "string_refs": [], "jni_calls": [], "syscalls": []}
+       ],
+       "upcalls": [],
+       "registered_by_code": [],
+       "imports_called": {},
+       "invalid_paths_count": 2
+     }}
+  ],
+  "binding": [],
+  "summary": {"elf_count": 1, "native_methods_declared": 0, "bound_static": 0, "bound_registered": 0,
+              "ambiguous": 0, "unbound": 0, "unclaimed": 0},
+  "errors": []
+}`
+
+func TestNativeDisasmInvalidPaths(t *testing.T) {
+	env := finishNativeDisasmFixture(t, nativeInvalidPathsReportBody, 50)
+	tail := env.Tails["disasm_functions"]
+	if tail.Total != 2 || tail.Returned != 2 || tail.Truncated {
+		t.Fatalf("disasm_functions tail = %+v", tail)
+	}
+	fn := tail.Items[0].(map[string]any)
+	if fn["invalid_paths"] != 2 || fn["truncated"] != false {
+		t.Errorf("function row = %v, want invalid_paths 2 and not truncated", fn)
+	}
+	total := tail.Items[1].(map[string]any)
+	want := map[string]any{
+		"row":                 "elf_total",
+		"elf":                 "lib/armeabi-v7a/libobf.so",
+		"elf_sha256":          nativeLibSHA,
+		"invalid_paths_count": 2,
+	}
+	if len(total) != len(want) {
+		t.Errorf("total row = %v, want only %v", total, want)
+	}
+	for k, w := range want {
+		if total[k] != w {
+			t.Errorf("total row %s = %v, want %v", k, total[k], w)
+		}
+	}
+	if head := env.Result.(map[string]any); head["disasm_functions_total"] != 1 {
+		t.Errorf("disasm_functions_total = %v, want the total row left out", head["disasm_functions_total"])
+	}
+}
