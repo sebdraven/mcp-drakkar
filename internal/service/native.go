@@ -206,6 +206,7 @@ func (s *Service) finishNative(env *Envelope, path string, maxRows int, disasm b
 			"static_exports_count": len(e.JNI.StaticExports),
 			"registered_count":     len(e.JNI.Registered),
 			"anomalies":            anomalies,
+			"invalid_paths_count":  invalidPathsCount(e),
 		})
 	}
 
@@ -233,25 +234,16 @@ func (s *Service) finishNative(env *Envelope, path string, maxRows int, disasm b
 	return nil
 }
 
-// nativeTerms defines the disasm labels drakkar_native surfaces; drakkar_legend
-// returns them with topic native.
-var nativeTerms = map[string]string{
-	"invalid_path":     "chemin de code abandonné car l'instruction à `address` ne se décode pas ; typiquement des octets poubelle derrière un prédicat opaque ; le reste de la fonction est analysé",
-	"opaque_dead_code": "même motif d'octets invalides dans >= 3 fonctions d'un ELF : signature d'obfuscation de type OLLVM",
-}
-
 // addNativeDisasm summarises every disassembled function without its
-// instructions or invalid_paths objects, which stay in report.json. Each ELF's
-// functions are followed by one elf_total row.
+// instructions or invalid_paths objects, which stay in report.json.
 func addNativeDisasm(env *Envelope, head map[string]any, elfs []nativeELF, maxRows int) {
 	var functions, upcalls, byCode []any
-	total, truncated, resolved, unresolved, withDisasm := 0, 0, 0, 0, 0
+	truncated, resolved, unresolved, withDisasm := 0, 0, 0, 0
 	for _, e := range elfs {
 		if e.Disasm == nil {
 			continue
 		}
 		withDisasm++
-		total += len(e.Disasm.Functions)
 		for _, f := range e.Disasm.Functions {
 			if f.Truncated {
 				truncated++
@@ -297,17 +289,11 @@ func addNativeDisasm(env *Envelope, head map[string]any, elfs []nativeELF, maxRo
 				"string_refs_total":    len(f.StringRefs),
 			})
 		}
-		functions = append(functions, map[string]any{
-			"row":                 "elf_total",
-			"elf":                 e.Path,
-			"elf_sha256":          e.SHA256,
-			"invalid_paths_count": intOrNil(e.Disasm.InvalidPathsCount),
-		})
 		upcalls = appendMembers(upcalls, e.Path, e.Disasm.Upcalls)
 		byCode = appendMembers(byCode, e.Path, e.Disasm.RegisteredByCode)
 	}
 
-	head["disasm_functions_total"] = total
+	head["disasm_functions_total"] = len(functions)
 	head["disasm_truncated"] = truncated
 	head["jni_calls_resolved"] = resolved
 	head["jni_calls_unresolved"] = unresolved
@@ -320,12 +306,13 @@ func addNativeDisasm(env *Envelope, head map[string]any, elfs []nativeELF, maxRo
 	}
 }
 
-// intOrNil keeps "not reported" (a Drakkar older than 0.2.3) apart from zero.
-func intOrNil(v *int) any {
-	if v == nil {
+// invalidPathsCount is null when the ELF has no disasm section or the Drakkar
+// predates 0.2.3, which keeps "not reported" apart from zero.
+func invalidPathsCount(e nativeELF) any {
+	if e.Disasm == nil || e.Disasm.InvalidPathsCount == nil {
 		return nil
 	}
-	return *v
+	return *e.Disasm.InvalidPathsCount
 }
 
 func stringOrNil(v *string) any {

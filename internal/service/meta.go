@@ -127,14 +127,10 @@ func (s *Service) Legend(ctx context.Context, in LegendInput) (*Envelope, error)
 	}
 	unknownFlagNote(env, "--decompile")
 	unknownFlagNote(env, "--bundle")
-	result := map[string]any{
+	env.Result = map[string]any{
 		"topic": in.Topic,
 		"text":  string(res.Stdout),
 	}
-	if in.Topic == "native" {
-		result["terms"] = nativeTerms
-	}
-	env.Result = result
 	if note != "" {
 		env.note(note)
 	}
