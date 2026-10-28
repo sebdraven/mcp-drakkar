@@ -136,14 +136,15 @@ type nativeDisasm struct {
 }
 
 type nativeFunction struct {
-	Origin       string            `json:"origin"`
-	Address      any               `json:"address"`
-	DisasmStatus string            `json:"disasm_status"`
-	Truncated    bool              `json:"truncated"`
-	Instructions []json.RawMessage `json:"instructions"`
-	Calls        []any             `json:"calls"`
-	StringRefs   []any             `json:"string_refs"`
-	JNICalls     []nativeJNICall   `json:"jni_calls"`
+	Origin          string            `json:"origin"`
+	Address         any               `json:"address"`
+	DisasmStatus    string            `json:"disasm_status"`
+	Truncated       bool              `json:"truncated"`
+	TruncatedReason *string           `json:"truncated_reason"`
+	Instructions    []json.RawMessage `json:"instructions"`
+	Calls           []any             `json:"calls"`
+	StringRefs      []any             `json:"string_refs"`
+	JNICalls        []nativeJNICall   `json:"jni_calls"`
 }
 
 // nativeJNICall: name is the JNIEnv function; method is the member it resolved to.
@@ -274,6 +275,7 @@ func addNativeDisasm(env *Envelope, head map[string]any, elfs []nativeELF, maxRo
 				"address":              f.Address,
 				"disasm_status":        f.DisasmStatus,
 				"truncated":            f.Truncated,
+				"truncated_reason":     stringOrNil(f.TruncatedReason),
 				"instructions_count":   len(f.Instructions),
 				"calls_count":          len(f.Calls),
 				"imports_called":       importsCalled(f.Calls),
@@ -298,6 +300,13 @@ func addNativeDisasm(env *Envelope, head map[string]any, elfs []nativeELF, maxRo
 	if len(elfs) > 0 && withDisasm == 0 {
 		env.note("disasm was requested but no ELF in the report carries a disasm section")
 	}
+}
+
+func stringOrNil(v *string) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 func setIfPresent(row map[string]any, key string, v *string) {
