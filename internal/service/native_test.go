@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -57,14 +59,14 @@ func finishNativeFixture(t *testing.T, body string, maxRows int) *Envelope {
 	t.Helper()
 	s, _ := testService(t)
 	env := &Envelope{}
-	if err := s.finishNative(env, writeReport(t, body), maxRows); err != nil {
+	if err := s.finishNative(env, writeReport(t, body), maxRows, false); err != nil {
 		t.Fatal(err)
 	}
 	return env
 }
 
 func TestNativeArgv(t *testing.T) {
-	argv, err := nativeArgs("/corpus/A sample.apk", "/out/report.json").Argv()
+	argv, err := nativeArgs("/corpus/A sample.apk", "/out/report.json", NativeInput{}).Argv()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,10 +221,335 @@ func TestNativeMissingReportAfterAFailureIsANote(t *testing.T) {
 	s, base := testService(t)
 	env := &Envelope{}
 	env.Drakkar.ExitCode = 2
-	if err := s.finishNative(env, filepath.Join(base, "report.json"), 50); err != nil {
+	if err := s.finishNative(env, filepath.Join(base, "report.json"), 50, false); err != nil {
 		t.Fatal(err)
 	}
 	if env.Result != nil || len(env.Notes) != 1 {
 		t.Errorf("result = %v, notes = %v", env.Result, env.Notes)
+	}
+}
+
+func nativeStringRefs(n int) string {
+	refs := make([]string, n)
+	for i := range refs {
+		refs[i] = fmt.Sprintf(`{"address": "0x%x", "target": "0x%x", "value": "s%d", "encoding": "utf8"}`,
+			0x1000+4*i, 0x4000+8*i, i)
+	}
+	return "[" + strings.Join(refs, ", ") + "]"
+}
+
+// The shape of a --native --native-disasm report as Drakkar's serde types write
+// it: three functions over two ELFs, and a registered_ambiguous pair lifted by
+// a RegisterNatives whose class comes from FindClass.
+var nativeDisasmReportBody = `{
+  "sha256": "` + nativeAPKSHA + `",
+  "elfs": [
+    {"path": "lib/arm64-v8a/libfoo.so", "origin": "lib", "sha256": "` + nativeLibSHA + `",
+     "machine": "aarch64", "bits": 64, "elf_type": "dyn", "stripped": true, "anomalies": [],
+     "jni": {"jni_onload": true, "jni_registration": "none", "static_exports": [], "registered": []},
+     "disasm": {
+       "functions": [
+         {"origin": "jni_onload", "address": "0x1000", "disasm_status": "ok", "truncated": false, "truncated_reason": null,
+          "instructions": [
+            {"address": "0x1000", "bytes": "fd7bbfa9", "mnemonic": "stp", "operands": "x29, x30, [sp, #-0x10]!"},
+            {"address": "0x1004", "bytes": "ff030094", "mnemonic": "bl", "operands": "$+0xffc"},
+            {"address": "0x1008", "bytes": "c0035fd6", "mnemonic": "ret", "operands": ""}
+          ],
+          "calls": [
+            {"target": "0x2000", "import": "dlopen", "symbol": null, "kind": "plt"},
+            {"target": "0x2010", "import": "dlsym", "symbol": null, "kind": "plt"},
+            {"target": null, "import": "dlopen", "symbol": null, "kind": "plt"},
+            {"target": "0x1800", "import": null, "symbol": "helper", "kind": "internal"}
+          ],
+          "string_refs": ` + nativeStringRefs(25) + `,
+          "jni_calls": [
+            {"name": "FindClass", "index": 6, "resolved": true, "class": "Lcom/a/Main;"},
+            {"name": "GetMethodID", "index": 33, "resolved": true, "class": "Lcom/a/Main;", "method": "onReady", "signature": "()V"},
+            {"name": "RegisterNatives", "index": 215, "resolved": false}
+          ],
+          "syscalls": []},
+         {"origin": "jni_registered", "address": "0x1200", "disasm_status": "truncated", "truncated": true,
+          "truncated_reason": "max_insns",
+          "instructions": [{"address": "0x1200", "bytes": "010000d4", "mnemonic": "svc", "operands": "#0x0"}],
+          "calls": [{"target": null, "import": null, "symbol": null, "kind": "indirect"}], "string_refs": [],
+          "jni_calls": [{"name": "CallVoidMethod", "index": 61, "resolved": false}],
+          "syscalls": [{"address": "0x1200", "number": 56}]}
+       ],
+       "upcalls": [
+         {"class": "Lcom/a/Main;", "name": "onReady", "signature": "()V"},
+         {"class": "Lcom/a/Main;", "name": "onFail", "signature": "(I)V"}
+       ],
+       "registered_by_code": [{"class": "Lcom/a/Main;", "name": "run", "signature": "()V"}],
+       "imports_called": {"dynload": ["dlopen", "dlsym"]}
+     }},
+    {"path": "assets/payload.bin", "origin": "assets", "sha256": "` + nativeAssetSHA + `",
+     "machine": "arm", "bits": 32, "elf_type": "dyn", "stripped": false, "anomalies": ["elf_outside_lib: assets"],
+     "jni": {"jni_onload": false, "jni_registration": "none", "static_exports": [], "registered": []},
+     "disasm": {
+       "functions": [
+         {"origin": "init_array", "address": "0x800", "disasm_status": "ok", "truncated": false, "truncated_reason": null,
+          "instructions": [{"address": "0x800", "bytes": "7047", "mnemonic": "bx", "operands": "lr"}],
+          "calls": [], "string_refs": [], "jni_calls": [], "syscalls": []}
+       ],
+       "upcalls": [{"class": "Lcom/a/Main;", "name": "onReady", "signature": "()V"}],
+       "registered_by_code": [],
+       "imports_called": {}
+     }}
+  ],
+  "binding": [
+    {"java": "Lcom/b/Other;->run()V", "status": "registered_ambiguous", "elf": "lib/arm64-v8a/libfoo.so", "elf_sha256": "` + nativeLibSHA + `",
+     "fn_offset": "0x1200", "candidates": ["Lcom/a/Main;->run()V", "Lcom/b/Other;->run()V"],
+     "disambiguated_by": "find_class", "class": "Lcom/a/Main;"},
+    {"java": "Lcom/a/Main;->run()V", "status": "registered_ambiguous", "elf": "lib/arm64-v8a/libfoo.so", "elf_sha256": "` + nativeLibSHA + `",
+     "fn_offset": "0x1200", "candidates": ["Lcom/a/Main;->run()V", "Lcom/b/Other;->run()V"],
+     "disambiguated_by": "find_class", "class": "Lcom/a/Main;"},
+    {"java": "Lcom/a/B;->gone()V", "status": "declared_unbound", "elf": null, "elf_sha256": null, "fn_offset": null, "candidates": []}
+  ],
+  "summary": {"elf_count": 2, "native_methods_declared": 3, "bound_static": 0, "bound_registered": 0,
+              "ambiguous": 2, "unbound": 1, "unclaimed": 0},
+  "errors": []
+}`
+
+func finishNativeDisasmFixture(t *testing.T, body string, maxRows int) *Envelope {
+	t.Helper()
+	s, _ := testService(t)
+	env := &Envelope{}
+	if err := s.finishNative(env, writeReport(t, body), maxRows, true); err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+func TestNativeArgvWithDisasm(t *testing.T) {
+	depth, insns := 2, 5000
+	for _, c := range []struct {
+		in   NativeInput
+		want []string
+	}{
+		{NativeInput{Disasm: true},
+			[]string{"/a.apk", "--native", "--native-disasm", "--format=json", "--json-out=/out/report.json"}},
+		{NativeInput{Disasm: true, DisasmDepth: &depth},
+			[]string{"/a.apk", "--native", "--native-disasm", "--disasm-depth=2", "--format=json", "--json-out=/out/report.json"}},
+		{NativeInput{Disasm: true, DisasmDepth: &depth, DisasmMaxInsns: &insns},
+			[]string{"/a.apk", "--native", "--native-disasm", "--disasm-depth=2", "--disasm-max-insns=5000", "--format=json", "--json-out=/out/report.json"}},
+	} {
+		argv, err := nativeArgs("/a.apk", "/out/report.json", c.in).Argv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(argv, "\x00") != strings.Join(c.want, "\x00") {
+			t.Errorf("argv = %q, want %q", argv, c.want)
+		}
+	}
+}
+
+func TestNativeDisasmBoundsNeedDisasm(t *testing.T) {
+	depth, insns := 1, 100
+	for _, in := range []NativeInput{
+		{DisasmDepth: &depth},
+		{DisasmMaxInsns: &insns},
+	} {
+		err := checkNativeDisasm(in)
+		if err == nil || !strings.Contains(err.Error(), "disasm=true") {
+			t.Errorf("%+v: err = %v", in, err)
+		}
+	}
+
+	s, base := testService(t)
+	_, err := s.Native(context.Background(), NativeInput{APK: filepath.Join(base, "a.apk"), DisasmDepth: &depth})
+	if err == nil || !strings.Contains(err.Error(), "disasm=true") {
+		t.Errorf("Native should refuse before running Drakkar, err = %v", err)
+	}
+}
+
+func TestNativeDisasmBounds(t *testing.T) {
+	for _, c := range []struct {
+		depth, insns *int
+		ok           bool
+	}{
+		{depth: intRef(0), ok: true},
+		{depth: intRef(3), ok: true},
+		{depth: intRef(-1)},
+		{depth: intRef(4)},
+		{insns: intRef(1), ok: true},
+		{insns: intRef(20000), ok: true},
+		{insns: intRef(0)},
+		{insns: intRef(20001)},
+	} {
+		err := checkNativeDisasm(NativeInput{Disasm: true, DisasmDepth: c.depth, DisasmMaxInsns: c.insns})
+		if c.ok && err != nil {
+			t.Errorf("depth=%v insns=%v refused: %v", deref(c.depth), deref(c.insns), err)
+		}
+		if !c.ok && (err == nil || !strings.Contains(err.Error(), "out of bounds")) {
+			t.Errorf("depth=%v insns=%v: err = %v", deref(c.depth), deref(c.insns), err)
+		}
+	}
+}
+
+func intRef(n int) *int { return &n }
+
+func deref(p *int) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+func TestNativeDisasmHeadCounters(t *testing.T) {
+	env := finishNativeDisasmFixture(t, nativeDisasmReportBody, 50)
+	head := env.Result.(map[string]any)
+	for k, want := range map[string]int{
+		"disasm_functions_total": 3, "disasm_truncated": 1, "jni_calls_resolved": 2, "jni_calls_unresolved": 2,
+	} {
+		if head[k] != want {
+			t.Errorf("%s = %v, want %d", k, head[k], want)
+		}
+	}
+	if head["ambiguous"] != float64(2) {
+		t.Errorf("the summary should still be the head, ambiguous = %v", head["ambiguous"])
+	}
+}
+
+func TestNativeDisasmFunctionRows(t *testing.T) {
+	env := finishNativeDisasmFixture(t, nativeDisasmReportBody, 50)
+	tail := env.Tails["disasm_functions"]
+	if tail.Total != 3 || tail.Returned != 3 || tail.Truncated {
+		t.Fatalf("disasm_functions tail = %+v", tail)
+	}
+	row := tail.Items[0].(map[string]any)
+	if row["elf"] != "lib/arm64-v8a/libfoo.so" || row["elf_sha256"] != nativeLibSHA {
+		t.Errorf("elf = %v / %v, want the path and the whole sha256", row["elf"], row["elf_sha256"])
+	}
+	if row["origin"] != "jni_onload" || row["address"] != "0x1000" || row["disasm_status"] != "ok" || row["truncated"] != false {
+		t.Errorf("row = %v", row)
+	}
+	if row["truncated_reason"] != nil {
+		t.Errorf("truncated_reason = %v, want null", row["truncated_reason"])
+	}
+	cut := tail.Items[1].(map[string]any)
+	if cut["truncated"] != true || cut["truncated_reason"] != "max_insns" || cut["disasm_status"] != "truncated" {
+		t.Errorf("truncated row = %v", cut)
+	}
+	if row["instructions_count"] != 3 || row["calls_count"] != 4 {
+		t.Errorf("counts = %v / %v", row["instructions_count"], row["calls_count"])
+	}
+	if _, present := row["instructions"]; present {
+		t.Error("instructions reached the row; they stay in report.json")
+	}
+	if got := strings.Join(row["imports_called"].([]string), ","); got != "dlopen,dlsym" {
+		t.Errorf("imports_called = %v", got)
+	}
+
+	jni := row["jni_calls"].([]any)
+	if len(jni) != 3 || row["jni_calls_unresolved"] != 1 {
+		t.Fatalf("jni_calls = %v, unresolved = %v", jni, row["jni_calls_unresolved"])
+	}
+	get := jni[1].(map[string]any)
+	if get["name"] != "GetMethodID" || get["class"] != "Lcom/a/Main;" || get["method"] != "onReady" || get["signature"] != "()V" {
+		t.Errorf("jni_calls[1] = %v", get)
+	}
+	if reg := jni[2].(map[string]any); reg["name"] != "RegisterNatives" || len(reg) != 1 {
+		t.Errorf("an unresolved call keeps its name only, got %v", reg)
+	}
+
+	if refs := row["string_refs"].([]any); len(refs) != 20 || row["string_refs_total"] != 25 {
+		t.Errorf("string_refs = %d of %v, want 20 of 25", len(refs), row["string_refs_total"])
+	}
+
+	asset := tail.Items[2].(map[string]any)
+	if asset["elf_sha256"] != nativeAssetSHA || asset["origin"] != "init_array" {
+		t.Errorf("asset row = %v", asset)
+	}
+	if imports := asset["imports_called"].([]string); imports == nil || len(imports) != 0 {
+		t.Errorf("imports_called = %#v, want an empty list", imports)
+	}
+}
+
+func TestNativeDisasmUpcallsAndRegisteredByCode(t *testing.T) {
+	env := finishNativeDisasmFixture(t, nativeDisasmReportBody, 50)
+	up := env.Tails["upcalls"]
+	if up.Total != 3 || up.Truncated {
+		t.Fatalf("upcalls tail = %+v", up)
+	}
+	want := []string{
+		"lib/arm64-v8a/libfoo.so Lcom/a/Main; onReady ()V",
+		"lib/arm64-v8a/libfoo.so Lcom/a/Main; onFail (I)V",
+		"assets/payload.bin Lcom/a/Main; onReady ()V",
+	}
+	for i, w := range want {
+		r := up.Items[i].(map[string]any)
+		if got := fmt.Sprintf("%v %v %v %v", r["elf"], r["class"], r["name"], r["signature"]); got != w {
+			t.Errorf("upcalls[%d] = %q, want %q", i, got, w)
+		}
+	}
+
+	byCode := env.Tails["registered_by_code"]
+	if byCode.Total != 1 {
+		t.Fatalf("registered_by_code tail = %+v", byCode)
+	}
+	if r := byCode.Items[0].(map[string]any); r["elf"] != "lib/arm64-v8a/libfoo.so" || r["name"] != "run" || r["signature"] != "()V" {
+		t.Errorf("registered_by_code[0] = %v", r)
+	}
+}
+
+func TestNativeMaxRowsCapsDisasmFunctions(t *testing.T) {
+	env := finishNativeDisasmFixture(t, nativeDisasmReportBody, 2)
+	f := env.Tails["disasm_functions"]
+	if f.Total != 3 || f.Returned != 2 || !f.Truncated {
+		t.Errorf("disasm_functions tail = %+v", f)
+	}
+	if u := env.Tails["upcalls"]; u.Total != 3 || u.Returned != 3 || u.Truncated {
+		t.Errorf("upcalls was cut: %+v", u)
+	}
+	if head := env.Result.(map[string]any); head["disasm_functions_total"] != 3 {
+		t.Errorf("disasm_functions_total = %v, want every function counted", head["disasm_functions_total"])
+	}
+}
+
+func TestNativeBindingKeepsDisambiguation(t *testing.T) {
+	env := finishNativeDisasmFixture(t, nativeDisasmReportBody, 50)
+	row := env.Tails["binding"].Items[0].(map[string]any)
+	if row["java"] != "Lcom/a/Main;->run()V" || row["disambiguated_by"] != "find_class" || row["class"] != "Lcom/a/Main;" {
+		t.Errorf("binding[0] = %v", row)
+	}
+	other := env.Tails["binding"].Items[1].(map[string]any)
+	if other["status"] != "registered_ambiguous" || other["class"] != "Lcom/a/Main;" {
+		t.Errorf("binding[1] = %v, want the other candidate, status kept, same class retained", other)
+	}
+}
+
+func TestNativeWithoutDisasmIgnoresTheDisasmSections(t *testing.T) {
+	env := finishNativeFixture(t, nativeDisasmReportBody, 50)
+	if len(env.Tails) != 3 {
+		t.Errorf("tails = %v, want elfs, binding and errors only", env.Tails)
+	}
+	head := env.Result.(map[string]any)
+	for _, k := range []string{"disasm_functions_total", "disasm_truncated", "jni_calls_resolved", "jni_calls_unresolved"} {
+		if _, present := head[k]; present {
+			t.Errorf("%s is in the head without disasm", k)
+		}
+	}
+}
+
+func TestNativeDisasmAskedButAbsentIsANote(t *testing.T) {
+	env := finishNativeDisasmFixture(t, nativeReportBody, 50)
+	if f := env.Tails["disasm_functions"]; f.Total != 0 || f.Items == nil {
+		t.Errorf("disasm_functions tail = %+v", f)
+	}
+	if head := env.Result.(map[string]any); head["disasm_functions_total"] != 0 {
+		t.Errorf("disasm_functions_total = %v", head["disasm_functions_total"])
+	}
+	if !strings.Contains(strings.Join(env.Notes, " "), "no ELF in the report carries a disasm section") {
+		t.Errorf("notes = %v", env.Notes)
+	}
+}
+
+func TestNativeNotesADrakkarThatPredatesNativeDisasm(t *testing.T) {
+	env := &Envelope{}
+	env.Drakkar.ExitCode = 2
+	env.Stderr.Text = "error: unexpected argument '--native-disasm' found\n\nUsage: drakkar [OPTIONS] [APK]\n"
+	noteUnknownNativeFlags(env, true)
+	if len(env.Notes) != 1 || env.Notes[0] != "this drakkar predates --native-disasm; drakkar_version shows which one is on PATH" {
+		t.Errorf("notes = %v", env.Notes)
 	}
 }

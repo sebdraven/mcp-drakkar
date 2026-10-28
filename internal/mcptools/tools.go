@@ -82,8 +82,10 @@ func Register(s *mcp.Server, svc *service.Service) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_native",
 		Description: "Static analysis of every ELF in the APK, found by content (lib/, assets/, res/raw/, elsewhere): sections, entropy, needed libraries, classified imports and strings, Java_* exports, JNINativeMethod tables rebuilt through relative relocations, and the binding of DEX native methods to them (static, registered, registered_ambiguous, declared_unbound, native_unclaimed). " +
-			"No disassembly, no execution. Use it for the Java↔native boundary; drakkar_native_arch only reads ELF headers under lib/. " +
+			"No execution, and no disassembly unless asked: with disasm=true, it also disassembles every JNI-bound function, JNI_OnLoad and init_array constructors (pure static disassembly, no execution) and decodes JNIEnv calls (FindClass, GetMethodID, RegisterNatives…), PLT imports called and referenced strings; full instructions stay in report.json. " +
+			"Use it for the Java↔native boundary; drakkar_native_arch only reads ELF headers under lib/. " +
 			"The head is the summary; elfs, binding (sorted by status, then java, cut at max_rows) and errors are tails, and sections, imports and strings stay in report_path. " +
+			"With disasm, disasm_functions (one row per function, cut at max_rows), upcalls and registered_by_code are tails too, and the head gains disasm_functions_total, disasm_truncated, jni_calls_resolved and jni_calls_unresolved. " +
 			"It extracts nothing: drakkar_extract_libs remains the tool for getting the files themselves. One APK at a time.",
 	}, r.native)
 
