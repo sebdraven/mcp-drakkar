@@ -20,7 +20,7 @@ import (
 )
 
 // Instructions is handed to the client once, so that the envelope contract and
-// the path rules are not repeated in twenty-seven descriptions.
+// the path rules are not repeated in twenty-eight descriptions.
 const Instructions = `Drakkar is a static analysis engine for Android APKs and raw DEX files. Every tool here runs the drakkar binary found on PATH; this server never builds, installs or downloads it.
 
 Paths are parameters, given per call, and must be absolute — a relative one would be resolved against a working directory nobody chose. There is nothing to configure and no directory to declare in advance.
@@ -78,6 +78,14 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"No date is ever estimated and no single figure is produced — these are the indicators, and reconciling them is the reader's job. " +
 			"Read drakkar_legend with topic dating before drawing a timeline from them.",
 	}, r.dating)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_native",
+		Description: "Static analysis of every ELF in the APK, found by content (lib/, assets/, res/raw/, elsewhere): sections, entropy, needed libraries, classified imports and strings, Java_* exports, JNINativeMethod tables rebuilt through relative relocations, and the binding of DEX native methods to them (static, registered, registered_ambiguous, declared_unbound, native_unclaimed). " +
+			"No disassembly, no execution. Use it for the Java↔native boundary; drakkar_native_arch only reads ELF headers under lib/. " +
+			"The head is the summary; elfs, binding (sorted by status, then java, cut at max_rows) and errors are tails, and sections, imports and strings stay in report_path. " +
+			"It extracts nothing: drakkar_extract_libs remains the tool for getting the files themselves. One APK at a time.",
+	}, r.native)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_native_arch",
@@ -257,6 +265,11 @@ func (r *registry) cert(ctx context.Context, _ *mcp.CallToolRequest, in service.
 
 func (r *registry) dating(ctx context.Context, _ *mcp.CallToolRequest, in service.InventoryInput) (*mcp.CallToolResult, *service.Envelope, error) {
 	env, err := r.svc.Dating(ctx, in)
+	return nil, env, err
+}
+
+func (r *registry) native(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	env, err := r.svc.Native(ctx, in)
 	return nil, env, err
 }
 

@@ -59,6 +59,8 @@ func init() {
 
 	// Native libraries and archive entries
 	known["--native-arch"] = switchFlag
+	// --native: Drakkar main 7445743ff1c9df6ed781b703f2e6a887597cb023, not yet in a tag
+	known["--native"] = switchFlag
 	known["--extract-libs"] = switchFlag
 	known["--list-entries"] = switchFlag
 	known["--extract-entry"] = multiFlag
