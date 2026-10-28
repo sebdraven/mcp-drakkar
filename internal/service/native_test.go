@@ -232,13 +232,15 @@ func TestNativeMissingReportAfterAFailureIsANote(t *testing.T) {
 func nativeStringRefs(n int) string {
 	refs := make([]string, n)
 	for i := range refs {
-		refs[i] = fmt.Sprintf(`{"address": "0x%x", "value": "s%d"}`, 0x4000+8*i, i)
+		refs[i] = fmt.Sprintf(`{"address": "0x%x", "target": "0x%x", "value": "s%d", "encoding": "utf8"}`,
+			0x1000+4*i, 0x4000+8*i, i)
 	}
 	return "[" + strings.Join(refs, ", ") + "]"
 }
 
-// The shape of a --native --native-disasm report: three functions over two
-// ELFs, a duplicated upcall, and a binding row settled by disambiguation.
+// The shape of a --native --native-disasm report as Drakkar's serde types write
+// it: three functions over two ELFs, and a registered_ambiguous pair lifted by
+// a RegisterNatives whose class comes from FindClass.
 var nativeDisasmReportBody = `{
   "sha256": "` + nativeAPKSHA + `",
   "elfs": [
@@ -247,12 +249,18 @@ var nativeDisasmReportBody = `{
      "jni": {"jni_onload": true, "jni_registration": "none", "static_exports": [], "registered": []},
      "disasm": {
        "functions": [
-         {"origin": "jni_onload", "address": "0x1000", "disasm_status": "ok", "truncated": false,
-          "instructions": [{"address": "0x1000", "text": "stp x29, x30, [sp, #-16]!"},
-                           {"address": "0x1004", "text": "bl 0x2000"},
-                           {"address": "0x1008", "text": "ret"}],
-          "calls": [{"target": "0x2000", "import": "dlopen"}, {"target": "0x2010", "import": "dlsym"},
-                    {"target": "0x2000", "import": "dlopen"}, {"target": "0x1800", "import": null}],
+         {"origin": "jni_onload", "address": "0x1000", "disasm_status": "ok", "truncated": false, "truncated_reason": null,
+          "instructions": [
+            {"address": "0x1000", "bytes": "fd7bbfa9", "mnemonic": "stp", "operands": "x29, x30, [sp, #-0x10]!"},
+            {"address": "0x1004", "bytes": "ff030094", "mnemonic": "bl", "operands": "$+0xffc"},
+            {"address": "0x1008", "bytes": "c0035fd6", "mnemonic": "ret", "operands": ""}
+          ],
+          "calls": [
+            {"target": "0x2000", "import": "dlopen", "symbol": null, "kind": "plt"},
+            {"target": "0x2010", "import": "dlsym", "symbol": null, "kind": "plt"},
+            {"target": null, "import": "dlopen", "symbol": null, "kind": "plt"},
+            {"target": "0x1800", "import": null, "symbol": "helper", "kind": "internal"}
+          ],
           "string_refs": ` + nativeStringRefs(25) + `,
           "jni_calls": [
             {"name": "FindClass", "index": 6, "resolved": true, "class": "Lcom/a/Main;"},
@@ -260,27 +268,28 @@ var nativeDisasmReportBody = `{
             {"name": "RegisterNatives", "index": 215, "resolved": false}
           ],
           "syscalls": []},
-         {"origin": "registered", "address": "0x1200", "disasm_status": "ok", "truncated": true,
-          "instructions": [{"address": "0x1200", "text": "ret"}], "calls": [], "string_refs": [],
+         {"origin": "jni_registered", "address": "0x1200", "disasm_status": "truncated", "truncated": true,
+          "truncated_reason": "max_insns",
+          "instructions": [{"address": "0x1200", "bytes": "010000d4", "mnemonic": "svc", "operands": "#0x0"}],
+          "calls": [{"target": null, "import": null, "symbol": null, "kind": "indirect"}], "string_refs": [],
           "jni_calls": [{"name": "CallVoidMethod", "index": 61, "resolved": false}],
-          "syscalls": [{"number": 56, "name": "openat"}]}
+          "syscalls": [{"address": "0x1200", "number": 56}]}
        ],
        "upcalls": [
          {"class": "Lcom/a/Main;", "name": "onReady", "signature": "()V"},
-         {"class": "Lcom/a/Main;", "name": "onFail", "signature": "(I)V"},
-         {"class": "Lcom/a/Main;", "name": "onReady", "signature": "()V"}
+         {"class": "Lcom/a/Main;", "name": "onFail", "signature": "(I)V"}
        ],
        "registered_by_code": [{"class": "Lcom/a/Main;", "name": "run", "signature": "()V"}],
-       "imports_called": {"dlopen": ["0x1000"], "dlsym": ["0x1000"]}
+       "imports_called": {"dynload": ["dlopen", "dlsym"]}
      }},
     {"path": "assets/payload.bin", "origin": "assets", "sha256": "` + nativeAssetSHA + `",
      "machine": "arm", "bits": 32, "elf_type": "dyn", "stripped": false, "anomalies": ["elf_outside_lib: assets"],
      "jni": {"jni_onload": false, "jni_registration": "none", "static_exports": [], "registered": []},
      "disasm": {
        "functions": [
-         {"origin": "init_array", "address": "0x800", "disasm_status": "ok", "truncated": false,
-          "instructions": [{"address": "0x800", "text": "bx lr"}], "calls": [], "string_refs": [],
-          "jni_calls": [], "syscalls": []}
+         {"origin": "init_array", "address": "0x800", "disasm_status": "ok", "truncated": false, "truncated_reason": null,
+          "instructions": [{"address": "0x800", "bytes": "7047", "mnemonic": "bx", "operands": "lr"}],
+          "calls": [], "string_refs": [], "jni_calls": [], "syscalls": []}
        ],
        "upcalls": [{"class": "Lcom/a/Main;", "name": "onReady", "signature": "()V"}],
        "registered_by_code": [],
@@ -288,12 +297,16 @@ var nativeDisasmReportBody = `{
      }}
   ],
   "binding": [
-    {"java": "Lcom/a/Main;->run()V", "status": "registered", "elf": "lib/arm64-v8a/libfoo.so", "elf_sha256": "` + nativeLibSHA + `",
-     "fn_offset": "0x1200", "candidates": [], "disambiguated_by": "find_class", "class": "Lcom/a/Main;"},
+    {"java": "Lcom/b/Other;->run()V", "status": "registered_ambiguous", "elf": "lib/arm64-v8a/libfoo.so", "elf_sha256": "` + nativeLibSHA + `",
+     "fn_offset": "0x1200", "candidates": ["Lcom/a/Main;->run()V", "Lcom/b/Other;->run()V"],
+     "disambiguated_by": "find_class", "class": "Lcom/a/Main;"},
+    {"java": "Lcom/a/Main;->run()V", "status": "registered_ambiguous", "elf": "lib/arm64-v8a/libfoo.so", "elf_sha256": "` + nativeLibSHA + `",
+     "fn_offset": "0x1200", "candidates": ["Lcom/a/Main;->run()V", "Lcom/b/Other;->run()V"],
+     "disambiguated_by": "find_class", "class": "Lcom/a/Main;"},
     {"java": "Lcom/a/B;->gone()V", "status": "declared_unbound", "elf": null, "elf_sha256": null, "fn_offset": null, "candidates": []}
   ],
-  "summary": {"elf_count": 2, "native_methods_declared": 2, "bound_static": 0, "bound_registered": 1,
-              "ambiguous": 0, "unbound": 1, "unclaimed": 0},
+  "summary": {"elf_count": 2, "native_methods_declared": 3, "bound_static": 0, "bound_registered": 0,
+              "ambiguous": 2, "unbound": 1, "unclaimed": 0},
   "errors": []
 }`
 
@@ -392,8 +405,8 @@ func TestNativeDisasmHeadCounters(t *testing.T) {
 			t.Errorf("%s = %v, want %d", k, head[k], want)
 		}
 	}
-	if head["bound_registered"] != float64(1) {
-		t.Errorf("the summary should still be the head, bound_registered = %v", head["bound_registered"])
+	if head["ambiguous"] != float64(2) {
+		t.Errorf("the summary should still be the head, ambiguous = %v", head["ambiguous"])
 	}
 }
 
@@ -409,6 +422,13 @@ func TestNativeDisasmFunctionRows(t *testing.T) {
 	}
 	if row["origin"] != "jni_onload" || row["address"] != "0x1000" || row["disasm_status"] != "ok" || row["truncated"] != false {
 		t.Errorf("row = %v", row)
+	}
+	if row["truncated_reason"] != nil {
+		t.Errorf("truncated_reason = %v, want null", row["truncated_reason"])
+	}
+	cut := tail.Items[1].(map[string]any)
+	if cut["truncated"] != true || cut["truncated_reason"] != "max_insns" || cut["disasm_status"] != "truncated" {
+		t.Errorf("truncated row = %v", cut)
 	}
 	if row["instructions_count"] != 3 || row["calls_count"] != 4 {
 		t.Errorf("counts = %v / %v", row["instructions_count"], row["calls_count"])
@@ -491,6 +511,10 @@ func TestNativeBindingKeepsDisambiguation(t *testing.T) {
 	row := env.Tails["binding"].Items[0].(map[string]any)
 	if row["java"] != "Lcom/a/Main;->run()V" || row["disambiguated_by"] != "find_class" || row["class"] != "Lcom/a/Main;" {
 		t.Errorf("binding[0] = %v", row)
+	}
+	other := env.Tails["binding"].Items[1].(map[string]any)
+	if other["status"] != "registered_ambiguous" || other["class"] != "Lcom/a/Main;" {
+		t.Errorf("binding[1] = %v, want the other candidate, status kept, same class retained", other)
 	}
 }
 
