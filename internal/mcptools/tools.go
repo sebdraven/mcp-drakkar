@@ -55,6 +55,7 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Name: "drakkar_legend",
 		Description: "Print Drakkar's own legend for a mode: the labels it emits and the rules it derives them by. " +
 			"These texts are where a metric's limits are stated — that orphan means unreferenced from code and not unused, that the near-class threshold is a parameter of the tool and not a published empirical value — so read the legend before interpreting a number from the matching mode. " +
+			"Topic native also returns terms, the definitions of invalid_path and opaque_dead_code as drakkar_native reports them. " +
 			"Reads no sample.",
 	}, r.legend)
 
@@ -86,6 +87,9 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"Use it for the Java↔native boundary; drakkar_native_arch only reads ELF headers under lib/. " +
 			"The head is the summary; elfs, binding (sorted by status, then java, cut at max_rows) and errors are tails, and sections, imports and strings stay in report_path. " +
 			"With disasm, disasm_functions (one row per function, cut at max_rows), upcalls and registered_by_code are tails too, and the head gains disasm_functions_total, disasm_truncated, jni_calls_resolved and jni_calls_unresolved. " +
+			"Each disasm_functions row carries invalid_paths, the number of invalid paths in that function, and each ELF's functions are followed by one row {row: elf_total, elf, elf_sha256, invalid_paths_count}, null when the drakkar predates 0.2.3; the invalid_paths objects themselves stay in report_path. " +
+			"An invalid_path is a code path abandoned because the instruction at its address does not decode, typically junk bytes behind an opaque predicate; the rest of the function is still analysed. " +
+			"An opaque_dead_code anomaly on an ELF means the same invalid byte pattern in at least 3 of its functions: the signature of OLLVM-style obfuscation. drakkar_legend with topic native defines both. " +
 			"It extracts nothing: drakkar_extract_libs remains the tool for getting the files themselves. One APK at a time.",
 	}, r.native)
 
