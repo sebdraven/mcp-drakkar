@@ -31,6 +31,7 @@ var wantTools = []string{
 	"drakkar_legend",
 	"drakkar_list_entries",
 	"drakkar_manifest",
+	"drakkar_native",
 	"drakkar_native_arch",
 	"drakkar_orphan_audit",
 	"drakkar_probe_api",
