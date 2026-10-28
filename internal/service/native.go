@@ -130,9 +130,10 @@ type nativeELF struct {
 }
 
 type nativeDisasm struct {
-	Functions        []nativeFunction `json:"functions"`
-	Upcalls          []nativeMember   `json:"upcalls"`
-	RegisteredByCode []nativeMember   `json:"registered_by_code"`
+	Functions         []nativeFunction `json:"functions"`
+	Upcalls           []nativeMember   `json:"upcalls"`
+	RegisteredByCode  []nativeMember   `json:"registered_by_code"`
+	InvalidPathsCount *int             `json:"invalid_paths_count"`
 }
 
 type nativeFunction struct {
@@ -141,6 +142,7 @@ type nativeFunction struct {
 	DisasmStatus    string            `json:"disasm_status"`
 	Truncated       bool              `json:"truncated"`
 	TruncatedReason *string           `json:"truncated_reason"`
+	InvalidPaths    []json.RawMessage `json:"invalid_paths"`
 	Instructions    []json.RawMessage `json:"instructions"`
 	Calls           []any             `json:"calls"`
 	StringRefs      []any             `json:"string_refs"`
@@ -231,16 +233,25 @@ func (s *Service) finishNative(env *Envelope, path string, maxRows int, disasm b
 	return nil
 }
 
+// nativeTerms defines the disasm labels drakkar_native surfaces; drakkar_legend
+// returns them with topic native.
+var nativeTerms = map[string]string{
+	"invalid_path":     "chemin de code abandonné car l'instruction à `address` ne se décode pas ; typiquement des octets poubelle derrière un prédicat opaque ; le reste de la fonction est analysé",
+	"opaque_dead_code": "même motif d'octets invalides dans >= 3 fonctions d'un ELF : signature d'obfuscation de type OLLVM",
+}
+
 // addNativeDisasm summarises every disassembled function without its
-// instructions, which stay in report.json.
+// instructions or invalid_paths objects, which stay in report.json. Each ELF's
+// functions are followed by one elf_total row.
 func addNativeDisasm(env *Envelope, head map[string]any, elfs []nativeELF, maxRows int) {
 	var functions, upcalls, byCode []any
-	truncated, resolved, unresolved, withDisasm := 0, 0, 0, 0
+	total, truncated, resolved, unresolved, withDisasm := 0, 0, 0, 0, 0
 	for _, e := range elfs {
 		if e.Disasm == nil {
 			continue
 		}
 		withDisasm++
+		total += len(e.Disasm.Functions)
 		for _, f := range e.Disasm.Functions {
 			if f.Truncated {
 				truncated++
@@ -276,6 +287,7 @@ func addNativeDisasm(env *Envelope, head map[string]any, elfs []nativeELF, maxRo
 				"disasm_status":        f.DisasmStatus,
 				"truncated":            f.Truncated,
 				"truncated_reason":     stringOrNil(f.TruncatedReason),
+				"invalid_paths":        len(f.InvalidPaths),
 				"instructions_count":   len(f.Instructions),
 				"calls_count":          len(f.Calls),
 				"imports_called":       importsCalled(f.Calls),
@@ -285,11 +297,17 @@ func addNativeDisasm(env *Envelope, head map[string]any, elfs []nativeELF, maxRo
 				"string_refs_total":    len(f.StringRefs),
 			})
 		}
+		functions = append(functions, map[string]any{
+			"row":                 "elf_total",
+			"elf":                 e.Path,
+			"elf_sha256":          e.SHA256,
+			"invalid_paths_count": intOrNil(e.Disasm.InvalidPathsCount),
+		})
 		upcalls = appendMembers(upcalls, e.Path, e.Disasm.Upcalls)
 		byCode = appendMembers(byCode, e.Path, e.Disasm.RegisteredByCode)
 	}
 
-	head["disasm_functions_total"] = len(functions)
+	head["disasm_functions_total"] = total
 	head["disasm_truncated"] = truncated
 	head["jni_calls_resolved"] = resolved
 	head["jni_calls_unresolved"] = unresolved
@@ -300,6 +318,14 @@ func addNativeDisasm(env *Envelope, head map[string]any, elfs []nativeELF, maxRo
 	if len(elfs) > 0 && withDisasm == 0 {
 		env.note("disasm was requested but no ELF in the report carries a disasm section")
 	}
+}
+
+// intOrNil keeps "not reported" (a Drakkar older than 0.2.3) apart from zero.
+func intOrNil(v *int) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 func stringOrNil(v *string) any {
