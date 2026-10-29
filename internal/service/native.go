@@ -13,15 +13,18 @@ import (
 
 // NativeInput is single-sample only, like --native-arch.
 type NativeInput struct {
-	APK string `json:"apk" jsonschema:"absolute path to one APK"`
+	APK string `json:"apk" jsonschema:"absolute path to one APK, or to one raw ELF (.so) recognised by its magic"`
+
+	NativeDex []string `json:"native_dex,omitempty" jsonschema:"absolute paths of APKs or raw DEX files whose native methods are bound to the ELFs, in addition to the APK's own DEX; needed to bind a raw ELF"`
 
 	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
-	Disasm         bool `json:"disasm,omitempty" jsonschema:"also disassemble, statically, every JNI-bound function, JNI_OnLoad and the init_array constructors, decoding JNIEnv calls, PLT imports called and referenced strings; adds the disasm_functions, upcalls and registered_by_code tails, and the instructions themselves stay in report_path"`
-	DisasmDepth    *int `json:"disasm_depth,omitempty" jsonschema:"with disasm only: how deep to follow local calls from each disassembled function, 0 to 3; omitted, Drakkar's default"`
-	DisasmMaxInsns *int `json:"disasm_max_insns,omitempty" jsonschema:"with disasm only: instruction budget per function, 1 to 20000, past which the function is marked truncated; omitted, Drakkar's default"`
+	Disasm         bool     `json:"disasm,omitempty" jsonschema:"also disassemble, statically, every JNI-bound function, JNI_OnLoad and the init_array constructors, decoding JNIEnv calls, PLT imports called and referenced strings; adds the disasm_functions, upcalls and registered_by_code tails, and the instructions themselves stay in report_path"`
+	DisasmDepth    *int     `json:"disasm_depth,omitempty" jsonschema:"with disasm only: how deep to follow local calls from each disassembled function, 0 to 3; omitted, Drakkar's default"`
+	DisasmMaxInsns *int     `json:"disasm_max_insns,omitempty" jsonschema:"with disasm only: instruction budget per function, 1 to 20000, past which the function is marked truncated; omitted, Drakkar's default"`
+	Listing        []string `json:"listing,omitempty" jsonschema:"with disasm only: <elf path|*>@<hex address> or <elf path|*>@<hex start>-<hex end> (end excluded); prints the instructions of that function or range with per-instruction comments; the elf path is elfs[].path, the file name for a raw ELF"`
 
-	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many binding rows, and with disasm disasm_functions rows, to return inline; elfs, errors, upcalls and registered_by_code come back whole, and the whole report stays on disk"`
+	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many binding rows, with disasm disasm_functions rows, and instructions per listing to return inline; elfs, errors, upcalls and registered_by_code come back whole, and the whole report stays on disk"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
 }
 
@@ -40,6 +43,11 @@ func (s *Service) Native(ctx context.Context, in NativeInput) (*Envelope, error)
 	apk, err := s.resolveOne("apk", in.APK)
 	if err != nil {
 		return nil, err
+	}
+	for _, p := range in.NativeDex {
+		if _, err := requireAbs("native_dex", p); err != nil {
+			return nil, err
+		}
 	}
 	out, err := s.begin("native", in.OutDir)
 	if err != nil {
@@ -69,6 +77,9 @@ func checkNativeDisasm(in NativeInput) error {
 		if in.DisasmDepth != nil || in.DisasmMaxInsns != nil {
 			return fmt.Errorf("disasm_depth and disasm_max_insns only apply with disasm=true")
 		}
+		if len(in.Listing) > 0 {
+			return fmt.Errorf("listing only applies with disasm=true")
+		}
 		return nil
 	}
 	if d := in.DisasmDepth; d != nil && (*d < 0 || *d > nativeDisasmMaxDepth) {
@@ -81,9 +92,10 @@ func checkNativeDisasm(in NativeInput) error {
 }
 
 func nativeArgs(apk, reportPath string, in NativeInput) *drakkar.Args {
-	args := drakkar.New().Positional(apk).Switch("--native")
+	args := drakkar.New().Positional(apk).Switch("--native").Multi("--native-dex", in.NativeDex)
 	if in.Disasm {
-		args.Switch("--native-disasm").Int("--disasm-depth", in.DisasmDepth).Int("--disasm-max-insns", in.DisasmMaxInsns)
+		args.Switch("--native-disasm").Int("--disasm-depth", in.DisasmDepth).Int("--disasm-max-insns", in.DisasmMaxInsns).
+			Multi("--native-listing", in.Listing)
 	}
 	return args.JSONReport(reportPath)
 }
@@ -104,11 +116,21 @@ func noteUnknownNativeFlags(env *Envelope, disasm bool) {
 var nativeStatuses = []string{"static", "registered", "registered_ambiguous", "declared_unbound", "native_unclaimed"}
 
 type nativeReport struct {
-	SHA256  string           `json:"sha256"`
-	ELFs    []nativeELF      `json:"elfs"`
-	Binding []map[string]any `json:"binding"`
-	Summary map[string]any   `json:"summary"`
-	Errors  []any            `json:"errors"`
+	SHA256       string           `json:"sha256"`
+	DexAvailable *bool            `json:"dex_available"`
+	DexSources   []string         `json:"dex_sources"`
+	ELFs         []nativeELF      `json:"elfs"`
+	Binding      []map[string]any `json:"binding"`
+	Summary      map[string]any   `json:"summary"`
+	Listings     []nativeListing  `json:"listings"`
+	Errors       []any            `json:"errors"`
+}
+
+type nativeListing struct {
+	ELF          string `json:"elf"`
+	Start        any    `json:"start"`
+	End          any    `json:"end"`
+	Instructions []any  `json:"instructions"`
 }
 
 type nativeELF struct {
@@ -164,8 +186,9 @@ type nativeMember struct {
 	Signature string `json:"signature"`
 }
 
-// finishNative puts summary in the head and three tails beside it: one row per
-// ELF, the binding rows sorted by status then java, and the report's errors.
+// finishNative puts summary, dex_available and dex_sources in the head and
+// three tails beside it: one row per ELF, the binding rows sorted by status then
+// java, and the report's errors. listings, when present, is a tail of its own.
 // With disasm, three more tails and four counters in the head.
 func (s *Service) finishNative(env *Envelope, path string, maxRows int, disasm bool) error {
 	raw, err := os.ReadFile(path)
@@ -181,7 +204,11 @@ func (s *Service) finishNative(env *Envelope, path string, maxRows int, disasm b
 		return fmt.Errorf("parsing %s: %w", path, err)
 	}
 
-	head := map[string]any{"sha256": r.SHA256}
+	head := map[string]any{
+		"sha256":        r.SHA256,
+		"dex_available": boolOrNil(r.DexAvailable),
+		"dex_sources":   r.DexSources,
+	}
 	for k, v := range r.Summary {
 		head[k] = v
 	}
@@ -219,6 +246,9 @@ func (s *Service) finishNative(env *Envelope, path string, maxRows int, disasm b
 		"elfs":    makeTail(elfs, len(elfs)),
 		"binding": makeTail(binding, maxRows),
 		"errors":  makeTail(errs, len(errs)),
+	}
+	if len(r.Listings) > 0 {
+		env.Tails["listings"] = listingsTail(r.Listings, maxRows)
 	}
 	env.ReportPath = path
 
@@ -313,6 +343,38 @@ func invalidPathsCount(e nativeELF) any {
 		return nil
 	}
 	return *e.Disasm.InvalidPathsCount
+}
+
+// listingsTail keeps every listing, each cut at maxRows instructions.
+func listingsTail(listings []nativeListing, maxRows int) Tail {
+	rows := make([]any, 0, len(listings))
+	for _, l := range listings {
+		insns := l.Instructions
+		if insns == nil {
+			insns = []any{}
+		}
+		total := len(insns)
+		if len(insns) > maxRows {
+			insns = insns[:maxRows]
+		}
+		rows = append(rows, map[string]any{
+			"elf":                l.ELF,
+			"start":              l.Start,
+			"end":                l.End,
+			"instructions":       insns,
+			"instructions_total": total,
+			"truncated":          len(insns) < total,
+		})
+	}
+	return makeTail(rows, len(rows))
+}
+
+// boolOrNil keeps "not reported" by an older Drakkar apart from false.
+func boolOrNil(v *bool) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 func stringOrNil(v *string) any {

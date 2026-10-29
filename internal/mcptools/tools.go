@@ -82,14 +82,16 @@ func Register(s *mcp.Server, svc *service.Service) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_native",
-		Description: "Static analysis of every ELF in the APK, found by content (lib/, assets/, res/raw/, elsewhere): sections, entropy, needed libraries, classified imports and strings, Java_* exports, JNINativeMethod tables rebuilt through relative relocations, and the binding of DEX native methods to them (static, registered, registered_ambiguous, declared_unbound, native_unclaimed). " +
+		Description: "Static analysis of every ELF in an APK, found by content (lib/, assets/, res/raw/, elsewhere), or of one raw ELF (.so) passed directly and recognised by its magic: sections, entropy, needed libraries, classified imports and strings, Java_* exports, JNINativeMethod tables rebuilt through relative relocations, and the binding of DEX native methods to them (static, registered, registered_ambiguous, declared_unbound, native_unclaimed). " +
+			"native_dex, APKs or raw DEX files, supplies native methods to bind: it is what binds a raw ELF, and with an APK it adds a decrypted payload DEX to the APK's own; natives from every source are merged before binding, and the head's dex_available and dex_sources say what was read. " +
 			"No execution, and no disassembly unless asked: with disasm=true, it also disassembles every JNI-bound function, JNI_OnLoad and init_array constructors (pure static disassembly, no execution) and decodes JNIEnv calls (FindClass, GetMethodID, RegisterNatives…), PLT imports called and referenced strings; full instructions stay in report.json. " +
 			"Use it for the Java↔native boundary; drakkar_native_arch only reads ELF headers under lib/. " +
 			"The head is the summary; elfs, binding (sorted by status, then java, cut at max_rows) and errors are tails, and sections, imports and strings stay in report_path. " +
 			"With disasm, disasm_functions (one row per function, cut at max_rows), upcalls and registered_by_code are tails too, and the head gains disasm_functions_total, disasm_truncated, jni_calls_resolved and jni_calls_unresolved. " +
 			"Each disasm_functions row carries invalid_paths, how many invalid paths that function has (the objects themselves stay in report_path), and each elfs row carries invalid_paths_count, null without disasm or from a drakkar older than 0.2.3. " +
+			"With disasm, listing (<elf|*>@<hex address> or <elf|*>@<hex start>-<hex end>, end excluded) returns readable assembly inline: the listings tail, one entry per listing, with address, bytes, mnemonic, operands and a per-instruction comment, cut at max_rows instructions and flagged truncated per listing; a listing that cannot be produced is reported in errors. " +
 			"drakkar_legend with topic=native defines invalid_paths, invalid_paths_count and the opaque_dead_code anomaly. " +
-			"It extracts nothing: drakkar_extract_libs remains the tool for getting the files themselves. One APK at a time.",
+			"It extracts nothing: drakkar_extract_libs remains the tool for getting the files themselves. One APK or one raw ELF at a time.",
 	}, r.native)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -242,7 +244,7 @@ func Register(s *mcp.Server, svc *service.Service) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_scan",
-		Description: "Run the rule engine and return the MITRE ATT&CK for Mobile detections. One APK, or a whole directory with one report per sample. " +
+		Description: "Run the rule engine and return the MITRE ATT&CK for Mobile detections. One APK, raw DEX or archive without AndroidManifest.xml, or a whole directory with one report per sample. " +
 			"Unlike every other tool here but drakkar_bundle, this one loads the MITRE catalogue, so a first call after a cache miss reaches the network; refresh forces that download. " +
 			"It is the heaviest mode: the inventory and measurement tools answer most questions without building the call graph.",
 	}, r.scan)

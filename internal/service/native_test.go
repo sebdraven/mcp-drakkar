@@ -604,3 +604,106 @@ func TestNativeDisasmInvalidPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeArgvWithNativeDexAndListing(t *testing.T) {
+	in := NativeInput{
+		Disasm:    true,
+		NativeDex: []string{"/corpus/host.apk", "/corpus/payload.dex"},
+		Listing:   []string{"libfoo.so@0x1000-0x1040"},
+	}
+	argv, err := nativeArgs("/corpus/libfoo.so", "/out/report.json", in).Argv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"/corpus/libfoo.so", "--native",
+		"--native-dex=/corpus/host.apk", "--native-dex=/corpus/payload.dex",
+		"--native-disasm", "--native-listing=libfoo.so@0x1000-0x1040",
+		"--format=json", "--json-out=/out/report.json",
+	}
+	if strings.Join(argv, "\x00") != strings.Join(want, "\x00") {
+		t.Errorf("argv = %q, want %q", argv, want)
+	}
+}
+
+func TestNativeListingNeedsDisasm(t *testing.T) {
+	in := NativeInput{Listing: []string{"*@0x1000"}}
+	if err := checkNativeDisasm(in); err == nil || !strings.Contains(err.Error(), "disasm=true") {
+		t.Errorf("err = %v", err)
+	}
+
+	s, base := testService(t)
+	in.APK = filepath.Join(base, "libfoo.so")
+	if _, err := s.Native(context.Background(), in); err == nil || !strings.Contains(err.Error(), "disasm=true") {
+		t.Errorf("Native should refuse before running Drakkar, err = %v", err)
+	}
+	relative := NativeInput{APK: in.APK, NativeDex: []string{"payload.dex"}}
+	if _, err := s.Native(context.Background(), relative); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Errorf("a relative native_dex should be refused, err = %v", err)
+	}
+}
+
+// A raw ELF bound against two DEX sources, with one listing, as Drakkar main writes it.
+var nativeListingReportBody = `{
+  "sha256": "` + nativeLibSHA + `",
+  "dex_available": true,
+  "dex_sources": ["/corpus/host.apk", "/corpus/payload.dex"],
+  "elfs": [
+    {"path": "libfoo.so", "origin": "raw", "sha256": "` + nativeLibSHA + `",
+     "machine": "aarch64", "bits": 64, "elf_type": "dyn", "stripped": true, "anomalies": [],
+     "jni": {"jni_onload": true, "jni_registration": "none", "static_exports": [], "registered": []},
+     "disasm": {"functions": [], "upcalls": [], "registered_by_code": [], "imports_called": {}, "invalid_paths_count": 0}}
+  ],
+  "binding": [],
+  "summary": {"elf_count": 1, "native_methods_declared": 0, "bound_static": 0, "bound_registered": 0,
+              "ambiguous": 0, "unbound": 0, "unclaimed": 0},
+  "listings": [
+    {"elf": "libfoo.so", "start": "0x1000", "end": "0x100c", "instructions": [
+      {"address": "0x1000", "bytes": "fd7bbfa9", "mnemonic": "stp", "operands": "x29, x30, [sp, #-0x10]!", "comment": null},
+      {"address": "0x1004", "bytes": "ff030094", "mnemonic": "bl", "operands": "$+0xffc", "comment": "dlopen"},
+      {"address": "0x1008", "bytes": "c0035fd6", "mnemonic": "ret", "operands": "", "comment": null}
+    ]}
+  ],
+  "errors": []
+}`
+
+func TestNativeDexSourcesAndListings(t *testing.T) {
+	env := finishNativeDisasmFixture(t, nativeListingReportBody, 2)
+	head := env.Result.(map[string]any)
+	if head["dex_available"] != true {
+		t.Errorf("dex_available = %v", head["dex_available"])
+	}
+	if got := strings.Join(head["dex_sources"].([]string), ","); got != "/corpus/host.apk,/corpus/payload.dex" {
+		t.Errorf("dex_sources = %v, want both, in reading order", got)
+	}
+
+	tail := env.Tails["listings"]
+	if tail.Total != 1 || tail.Returned != 1 || tail.Truncated {
+		t.Fatalf("listings tail = %+v", tail)
+	}
+	l := tail.Items[0].(map[string]any)
+	if l["elf"] != "libfoo.so" || l["start"] != "0x1000" || l["end"] != "0x100c" {
+		t.Errorf("listing = %v", l)
+	}
+	insns := l["instructions"].([]any)
+	if len(insns) != 2 || l["instructions_total"] != 3 || l["truncated"] != true {
+		t.Errorf("instructions = %d of %v, truncated %v; want 2 of 3, truncated", len(insns), l["instructions_total"], l["truncated"])
+	}
+	if c := insns[1].(map[string]any)["comment"]; c != "dlopen" {
+		t.Errorf("comment = %v", c)
+	}
+
+	whole := finishNativeDisasmFixture(t, nativeListingReportBody, 50)
+	l = whole.Tails["listings"].Items[0].(map[string]any)
+	if len(l["instructions"].([]any)) != 3 || l["truncated"] != false {
+		t.Errorf("listing = %v, want every instruction and not truncated", l)
+	}
+
+	old := finishNativeFixture(t, nativeReportBody, 50)
+	if head := old.Result.(map[string]any); head["dex_available"] != nil {
+		t.Errorf("dex_available = %v, want null when the report does not carry it", head["dex_available"])
+	}
+	if _, present := old.Tails["listings"]; present {
+		t.Error("a report without listings grew a listings tail")
+	}
+}
