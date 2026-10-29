@@ -65,6 +65,9 @@ func init() {
 	known["--native-disasm"] = switchFlag
 	known["--disasm-depth"] = valueFlag
 	known["--disasm-max-insns"] = valueFlag
+	// --native-dex and --native-listing: Drakkar main, not yet in a tag
+	known["--native-dex"] = multiFlag
+	known["--native-listing"] = multiFlag
 	known["--extract-libs"] = switchFlag
 	known["--list-entries"] = switchFlag
 	known["--extract-entry"] = multiFlag
