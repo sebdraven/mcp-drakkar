@@ -96,6 +96,7 @@ func init() {
 	// Decompilation and bundle, since 0.2.0
 	known["--decompile"] = optionalMultiFlag
 	known["--bundle"] = optionalValueFlag
+	known["--archive"] = switchFlag
 
 	// Resources
 	known["--resource"] = multiFlag

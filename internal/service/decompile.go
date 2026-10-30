@@ -46,7 +46,7 @@ func (s *Service) Decompile(ctx context.Context, in DecompileInput) (*Envelope, 
 	if err != nil {
 		return nil, err
 	}
-	unknownFlagNote(env, "--decompile")
+	unknownFlagNote(env, "--decompile", "0.2.0")
 
 	path, err := out.file("decompiled.java")
 	if err != nil {
@@ -113,7 +113,8 @@ type BundleInput struct {
 	Input string `json:"input" jsonschema:"absolute path to one APK or raw DEX, recognised by content rather than by extension"`
 
 	OutDir    string `json:"out_dir" jsonschema:"absolute directory OUT; the bundle is written to OUT/<sha256 of the input>/. Required: the bundle is a deliverable, never a temporary report"`
-	Overwrite bool   `json:"overwrite,omitempty" jsonschema:"replace an existing OUT/<sha256>/; without it Drakkar refuses and leaves the existing bundle untouched"`
+	Overwrite bool   `json:"overwrite,omitempty" jsonschema:"replace an existing OUT/<sha256>/; an existing OUT/<sha256>.bundle.zip is replaced with archive and deleted without it, so it never outlives the bundle it was made from. Without overwrite, Drakkar refuses an existing OUT/<sha256>/, and with archive an existing OUT/<sha256>.bundle.zip, leaving them untouched"`
+	Archive   bool   `json:"archive,omitempty" jsonschema:"also write OUT/<sha256>.bundle.zip, the whole bundle directory under <sha256>/ in one deterministic file: the file to upload to an import service. Needs Drakkar 0.3.0"`
 
 	Jobs *int `json:"jobs,omitempty" jsonschema:"worker threads for the per-class pass; omit to leave Drakkar's own choice in force"`
 
@@ -143,16 +144,16 @@ func (s *Service) Bundle(ctx context.Context, in BundleInput) (*Envelope, error)
 	if err != nil {
 		return nil, err
 	}
-	args := drakkar.New().Positional(input).
-		OptionalValue("--bundle", out.path).
-		SwitchIf("--overwrite", in.Overwrite).
-		Int("--jobs", in.Jobs)
+	args := bundleArgs(input, out.path, in)
 
-	env, _, err := s.invoke(ctx, out, s.timeout(s.timeouts.Bulk, in.TimeoutSeconds), args)
+	env, res, err := s.invoke(ctx, out, s.timeout(s.timeouts.Bulk, in.TimeoutSeconds), args)
 	if err != nil {
 		return nil, err
 	}
-	unknownFlagNote(env, "--bundle")
+	unknownFlagNote(env, "--bundle", "0.2.0")
+	if in.Archive {
+		unknownFlagNote(env, "--archive", "0.3.0")
+	}
 	if env.Drakkar.ExitCode != 0 || env.Drakkar.TimedOut {
 		if line := errorLine(env.Stderr.Text); line != "" {
 			env.note("Drakkar's message, verbatim: " + line)
@@ -167,10 +168,52 @@ func (s *Service) Bundle(ctx context.Context, in BundleInput) (*Envelope, error)
 		env.note(fmt.Sprintf("drakkar exited 0 but no [OK] line naming %s/<sha256> was found on stderr; the bundle directory is not located by guessing", out.path))
 		return env, nil
 	}
-	if err := s.finishBundle(env, root, ClampRows(in.MaxRows)); err != nil {
+	var archive *bundleArchive
+	if in.Archive {
+		if a, ok := archiveReport(res.Stdout); ok {
+			archive = &a
+		} else {
+			env.note("archive was asked for, but Drakkar's report on stdout has no complete archive_path, archive_size and archive_sha256 lines; the archive is not located or hashed by guessing")
+		}
+	}
+	if err := s.finishBundle(env, root, ClampRows(in.MaxRows), archive); err != nil {
 		return nil, err
 	}
 	return env, nil
+}
+
+func bundleArgs(input, out string, in BundleInput) *drakkar.Args {
+	return drakkar.New().Positional(input).
+		OptionalValue("--bundle", out).
+		SwitchIf("--overwrite", in.Overwrite).
+		SwitchIf("--archive", in.Archive).
+		Int("--jobs", in.Jobs)
+}
+
+// bundleArchive is what --bundle --archive reports about OUT/<sha256>.bundle.zip.
+type bundleArchive struct {
+	path   string
+	size   int64
+	sha256 string
+}
+
+// archiveReport reads the archive lines of --bundle's text report on stdout,
+// one key<TAB>value per line: archive_path, archive_size, archive_sha256. All
+// three must be present and well formed, the hash whole.
+func archiveReport(stdout []byte) (bundleArchive, bool) {
+	fields := map[string]string{}
+	for _, line := range strings.Split(string(stdout), "\n") {
+		key, value, found := strings.Cut(strings.TrimRight(line, "\r"), "\t")
+		if found {
+			fields[key] = value
+		}
+	}
+	size, err := strconv.ParseInt(fields["archive_size"], 10, 64)
+	sha := fields["archive_sha256"]
+	if fields["archive_path"] == "" || err != nil || size < 0 || len(sha) != 64 || !isHex(sha) {
+		return bundleArchive{}, false
+	}
+	return bundleArchive{path: fields["archive_path"], size: size, sha256: sha}, true
 }
 
 // bundleRoot reads OUT/<sha256> from the line run_bundle prints once every file
@@ -239,8 +282,8 @@ func sha256File(path string) (string, error) {
 
 // finishBundle shapes bundle.json, errors.json and index.json into the head.
 // bundle.json goes back whole; the index is aggregated, since drakkar_bundle_index
-// is the tool for reading it.
-func (s *Service) finishBundle(env *Envelope, root string, maxRows int) error {
+// is the tool for reading it. archive, when set, is copied as Drakkar reported it.
+func (s *Service) finishBundle(env *Envelope, root string, maxRows int, archive *bundleArchive) error {
 	var info map[string]any
 	if err := readJSONFile(filepath.Join(root, "bundle.json"), &info); err != nil {
 		return err
@@ -263,7 +306,7 @@ func (s *Service) finishBundle(env *Envelope, root string, maxRows int) error {
 		perClassJava[label(e["class_java"])]++
 	}
 
-	env.Result = map[string]any{
+	result := map[string]any{
 		"bundle_dir":           root,
 		"bundle":               info,
 		"classes_total":        len(index),
@@ -272,6 +315,15 @@ func (s *Service) finishBundle(env *Envelope, root string, maxRows int) error {
 		"per_class_java":       perClassJava,
 		"errors_total":         len(errs),
 	}
+	if archive != nil {
+		result["archive_path"] = archive.path
+		result["archive_size"] = archive.size
+		result["archive_sha256"] = archive.sha256
+		if filepath.Clean(archive.path) != filepath.Clean(root)+".bundle.zip" {
+			env.note(fmt.Sprintf("Drakkar reports the archive at %s, not next to the bundle as %s.bundle.zip; one of the two is not this input's", archive.path, root))
+		}
+	}
+	env.Result = result
 	env.Tails = map[string]Tail{"errors": makeTail(errs, maxRows)}
 	env.ReportPath = root
 
@@ -301,10 +353,11 @@ func label(v any) string {
 	return fmt.Sprint(v)
 }
 
-// errorLine is the first line anyhow prints for a failed main: "Error: …".
+// errorLine is the first line anyhow prints for a failed main, "Error: …", or
+// clap for a refused command line, "error: …".
 func errorLine(stderr string) string {
 	for _, line := range strings.Split(stderr, "\n") {
-		if strings.HasPrefix(line, "Error: ") {
+		if strings.HasPrefix(line, "Error: ") || strings.HasPrefix(line, "error: ") {
 			return line
 		}
 	}
@@ -325,10 +378,11 @@ func (s *Service) requireBundleModes(ctx context.Context, tool string) (string, 
 	return v, nil
 }
 
-// unknownFlagNote names clap's refusal of a flag this Drakkar predates.
-func unknownFlagNote(env *Envelope, flag string) {
+// unknownFlagNote names clap's refusal of a flag this Drakkar predates. Drakkar's
+// own message stays as it is in stderr.text.
+func unknownFlagNote(env *Envelope, flag, release string) {
 	if env.Drakkar.ExitCode != 0 && strings.Contains(env.Stderr.Text, "unexpected argument '"+flag) {
-		env.note(fmt.Sprintf("this drakkar does not know %s: it predates 0.2.0, which introduced it; drakkar_version shows which one is on PATH", flag))
+		env.note(fmt.Sprintf("this drakkar does not know %s: it predates %s, which introduced it; drakkar_version shows which one is on PATH", flag, release))
 	}
 }
 

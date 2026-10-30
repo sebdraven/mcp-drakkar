@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -234,6 +235,143 @@ func TestErrorsForMatchesTheClassID(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].(map[string]any)["stage"] != "decompile_class" {
 		t.Errorf("got %v", got)
+	}
+}
+
+func TestBundleArgsPassArchiveOnlyWhenAsked(t *testing.T) {
+	jobs := 4
+	in := BundleInput{Overwrite: true, Jobs: &jobs}
+	argv, err := bundleArgs("/corpus/a.apk", "/out", in).Argv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"/corpus/a.apk", "--bundle=/out", "--overwrite", "--jobs=4"}; !slices.Equal(argv, want) {
+		t.Errorf("argv = %q, want %q", argv, want)
+	}
+
+	in.Archive = true
+	argv, err = bundleArgs("/corpus/a.apk", "/out", in).Argv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"/corpus/a.apk", "--bundle=/out", "--overwrite", "--archive", "--jobs=4"}; !slices.Equal(argv, want) {
+		t.Errorf("argv = %q, want %q", argv, want)
+	}
+}
+
+// drakkarBundleReport is --bundle --archive's stdout, as run_bundle prints it.
+const drakkarBundleReport = "bundle_dir\t/out/" + bundleSHA + "\n" +
+	"archive_path\t/out/" + bundleSHA + ".bundle.zip\n" +
+	"archive_size\t1048576\n" +
+	"archive_sha256\tba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n"
+
+func TestArchiveFieldsAreReadFromDrakkarsReport(t *testing.T) {
+	a, ok := archiveReport([]byte(drakkarBundleReport))
+	if !ok {
+		t.Fatal("the archive lines were not read")
+	}
+	if a.path != "/out/"+bundleSHA+".bundle.zip" || a.size != 1048576 {
+		t.Errorf("archive = %+v", a)
+	}
+	if a.sha256 != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" {
+		t.Errorf("sha256 = %q", a.sha256)
+	}
+}
+
+func TestAnIncompleteArchiveReportIsNotRead(t *testing.T) {
+	for name, stdout := range map[string]string{
+		"no archive": "bundle_dir\t/out/" + bundleSHA + "\n",
+		"not a hash": strings.Replace(drakkarBundleReport, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "unknown", 1),
+		"no size":    strings.Replace(drakkarBundleReport, "archive_size\t1048576\n", "", 1),
+	} {
+		if a, ok := archiveReport([]byte(stdout)); ok {
+			t.Errorf("%s: read as %+v", name, a)
+		}
+	}
+}
+
+// writeBundle lays out the three files finishBundle reads, bundle.json as
+// Drakkar 0.3.0 writes it.
+func writeBundle(t *testing.T, rulesHash string) string {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), bundleSHA)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	info := `{"schema_version": 1, "sha256": "` + bundleSHA + `", "input_size": 2048, "input_kind": "apk", ` +
+		`"rules_hash": ` + rulesHash + `, "packed": {"detected": false}}`
+	for name, body := range map[string]string{
+		"bundle.json": info,
+		"errors.json": "[]",
+		"index.json":  bundleIndex,
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func TestBundleJSONNewFieldsComeBackWhole(t *testing.T) {
+	const rulesHash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+	root := writeBundle(t, `"`+rulesHash+`"`)
+	env := &Envelope{}
+	if err := New(DefaultTimeouts()).finishBundle(env, root, 10, nil); err != nil {
+		t.Fatal(err)
+	}
+	result := env.Result.(map[string]any)
+	info := result["bundle"].(map[string]any)
+	if info["schema_version"] != float64(1) || info["input_size"] != float64(2048) || info["rules_hash"] != rulesHash {
+		t.Errorf("bundle = %v", info)
+	}
+	if _, ok := result["archive_path"]; ok {
+		t.Error("archive_path is present although no archive was asked for")
+	}
+
+	root = writeBundle(t, "null")
+	env = &Envelope{}
+	if err := New(DefaultTimeouts()).finishBundle(env, root, 10, nil); err != nil {
+		t.Fatal(err)
+	}
+	info = env.Result.(map[string]any)["bundle"].(map[string]any)
+	if v, ok := info["rules_hash"]; !ok || v != nil {
+		t.Errorf("rules_hash = %v, %v; want a null kept as null", v, ok)
+	}
+}
+
+func TestArchiveFieldsJoinTheAnswer(t *testing.T) {
+	root := writeBundle(t, "null")
+	a, ok := archiveReport([]byte(strings.ReplaceAll(drakkarBundleReport, "/out/"+bundleSHA, root)))
+	if !ok {
+		t.Fatal("the archive lines were not read")
+	}
+	env := &Envelope{}
+	if err := New(DefaultTimeouts()).finishBundle(env, root, 10, &a); err != nil {
+		t.Fatal(err)
+	}
+	result := env.Result.(map[string]any)
+	if result["archive_path"] != root+".bundle.zip" || result["archive_size"] != int64(1048576) ||
+		result["archive_sha256"] != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" {
+		t.Errorf("result = %v", result)
+	}
+	for _, n := range env.Notes {
+		if strings.Contains(n, "not next to the bundle") {
+			t.Errorf("unexpected note: %s", n)
+		}
+	}
+}
+
+func TestAnOlderDrakkarsRefusalOfArchiveComesBackAsIs(t *testing.T) {
+	const clap = "error: unexpected argument '--archive' found"
+	env := &Envelope{}
+	env.Drakkar.ExitCode = 2
+	env.Stderr.Text = clap + "\n\nUsage: drakkar [OPTIONS] [APK]\n"
+	unknownFlagNote(env, "--archive", "0.3.0")
+	if len(env.Notes) != 1 || !strings.Contains(env.Notes[0], "0.3.0") {
+		t.Errorf("notes = %q", env.Notes)
+	}
+	if got := errorLine(env.Stderr.Text); got != clap {
+		t.Errorf("errorLine = %q, want clap's line verbatim", got)
 	}
 }
 
