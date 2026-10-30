@@ -125,8 +125,8 @@ func (s *Service) Legend(ctx context.Context, in LegendInput) (*Envelope, error)
 	if err != nil {
 		return nil, err
 	}
-	unknownFlagNote(env, "--decompile")
-	unknownFlagNote(env, "--bundle")
+	unknownFlagNote(env, "--decompile", "0.2.0")
+	unknownFlagNote(env, "--bundle", "0.2.0")
 	env.Result = map[string]any{
 		"topic": in.Topic,
 		"text":  string(res.Stdout),

@@ -128,7 +128,9 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Description: "Write the bundle of one APK or raw DEX to out_dir/<sha256 of the input>/: manifest, signature, dating, rule matches, string pool and static values, dynamic entry points, and every class disassembled and decompiled, libraries included, one set of files per class id. " +
 			"The answer is bundle.json whole, the count and a preview of errors.json, and the classes of index.json counted by origin, decompile_status and class_java; read the classes themselves with drakkar_bundle_index, then drakkar_bundle_class. " +
 			"out_dir is required, and an existing bundle of the same input is refused unless overwrite is set. Like drakkar_scan it loads the MITRE catalogue, so a first call after a cache miss reaches the network. A part that fails is null in its file and recorded in errors.json rather than stopping the bundle. " +
-			"drakkar_legend with topic bundle defines every file and field. Needs Drakkar 0.2.0.",
+			"bundle.json carries schema_version (the version of the bundle's structure, raised on any incompatible change), input_size (the input's size in bytes) and rules_hash (the whole SHA-256 of the rule set and MITRE catalogue behind rules.json, null when rules.json is null); a Drakkar older than 0.3.0 writes none of the three. " +
+			"With archive, Drakkar also writes out_dir/<sha256>.bundle.zip: the whole bundle directory, every entry under <sha256>/, byte-identical for identical directory content. That .bundle.zip is the file to upload to an import service. The answer then gains archive_path, archive_size (bytes) and archive_sha256 (whole), as Drakkar reports them; overwrite also replaces an existing archive, or deletes it when archive is not set; without overwrite an existing one is refused. " +
+			"drakkar_legend with topic bundle defines every file and field. Needs Drakkar 0.2.0; archive needs Drakkar 0.3.0, and an older one refuses the flag with a message that comes back as is.",
 	}, r.bundle)
 
 	mcp.AddTool(s, &mcp.Tool{

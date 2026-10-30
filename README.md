@@ -128,6 +128,15 @@ list, or renamed by ProGuard, counts as app. And the Java is read against the
 guarantee fidelity. `drakkar_legend` with topic `bundle` defines every file and
 field.
 
+To hand a bundle to an import service, pass `"archive": true` (Drakkar 0.3.0).
+Drakkar then also writes `OUT/<sha256>.bundle.zip`, every entry under
+`<sha256>/`, byte-identical for identical directory content, and the answer
+gains `archive_path`, `archive_size` and `archive_sha256` as Drakkar reports
+them. That file is the one to upload. With `overwrite`, an existing archive is replaced, or deleted when `archive` is not set. An older
+Drakkar refuses the flag, and its message comes back as it is in `stderr`.
+From 0.3.0, `bundle.json` also carries `schema_version`, `input_size` and
+`rules_hash`.
+
 ## The answer
 
 Every tool returns the same envelope:
