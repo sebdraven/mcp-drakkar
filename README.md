@@ -132,10 +132,15 @@ To hand a bundle to an import service, pass `"archive": true` (Drakkar 0.3.0).
 Drakkar then also writes `OUT/<sha256>.bundle.zip`, every entry under
 `<sha256>/`, byte-identical for identical directory content, and the answer
 gains `archive_path`, `archive_size` and `archive_sha256` as Drakkar reports
-them. That file is the one to upload. With `overwrite`, an existing archive is replaced, or deleted when `archive` is not set. An older
-Drakkar refuses the flag, and its message comes back as it is in `stderr`.
-From 0.3.0, `bundle.json` also carries `schema_version`, `input_size` and
-`rules_hash`.
+them — the hash whole, never recomputed here. That file is the one to upload.
+With `overwrite`, an existing archive is replaced, or deleted when `archive` is
+not set, so it never outlives the bundle it was made from. An older Drakkar
+refuses the flag, and its message comes back as it is in `stderr`.
+
+From 0.3.0, `bundle.json` also carries `schema_version` (the version of the
+bundle's structure), `input_size` (bytes) and `rules_hash` (the whole SHA-256
+of the rule set and MITRE catalogue behind `rules.json`, null when `rules.json`
+is null). They come back unfiltered in `result.bundle`.
 
 ## The answer
 
@@ -250,11 +255,11 @@ Nothing travels alongside the binary, so the binary answers for itself:
 
 ```
 $ mcp-drakkar -version
-mcp-drakkar 0.4.0
+mcp-drakkar 0.9.0
 commit:         <the full commit, injected at link time>
 target:         darwin/arm64
 go:             go1.27.1
-drakkar tested: 0.2.0 (01eee3b6b8acf75bb15dd90e2ee5e301c1f90d21)
+drakkar tested: 0.3.0 (b361caba436f2cbeafc01076a9e75272cf720dc4)
 ```
 
 Only the commit is injected. `Version` and `DrakkarTested` are constants in
@@ -291,6 +296,16 @@ git config core.hooksPath .githooks
 ```
 
 When gofmt fails, run `gofmt -w .` and commit again.
+
+## Related
+
+- [Drakkar](https://github.com/sebdraven/drakkar) — the analysis engine this
+  server exposes.
+
+## Acknowledgements
+
+This work is part of the DEFMAL project, funded by the French National
+Research Agency (ANR) under France 2030, reference ANR-22-PECY-0007.
 
 ## Licence
 
