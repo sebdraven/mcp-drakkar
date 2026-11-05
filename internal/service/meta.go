@@ -70,7 +70,7 @@ func (s *Service) Version(ctx context.Context, _ VersionInput) (*Envelope, error
 
 // LegendInput selects which legend to print.
 type LegendInput struct {
-	Topic string `json:"topic" jsonschema:"one of manifest, cert, dating, assets, entries, resources, api_surface, diff_dex, diff_strings, diff_explain, diff_matrix, disasm, decompile, bundle, native"`
+	Topic string `json:"topic" jsonschema:"one of manifest, cert, dating, assets, entries, resources, api_surface, diff_dex, diff_strings, diff_explain, diff_matrix, disasm, decompile, bundle, native, dart_snapshot"`
 }
 
 // Legend prints Drakkar's own legend for a mode. These texts are what keeps a
@@ -105,6 +105,9 @@ func (s *Service) Legend(ctx context.Context, in LegendInput) (*Envelope, error)
 		args.OptionalValue("--bundle", "")
 	case "native":
 		args.Switch("--native")
+	case "dart_snapshot":
+		args.Switch("--dart-snapshot")
+		note = legendDartCalibrateFileNote
 	case "diff_dex":
 		args.Pair("--diff-dex", legendPlaceholder, legendPlaceholder)
 		note = legendPlaceholderNote
@@ -118,7 +121,7 @@ func (s *Service) Legend(ctx context.Context, in LegendInput) (*Envelope, error)
 		args.Value("--diff-matrix", legendPlaceholder)
 		note = legendPlaceholderNote
 	default:
-		return nil, fmt.Errorf("topic %q is not one of manifest, cert, dating, assets, entries, resources, api_surface, diff_dex, diff_strings, diff_explain, diff_matrix, disasm, decompile, bundle, native", in.Topic)
+		return nil, fmt.Errorf("topic %q is not one of manifest, cert, dating, assets, entries, resources, api_surface, diff_dex, diff_strings, diff_explain, diff_matrix, disasm, decompile, bundle, native, dart_snapshot", in.Topic)
 	}
 
 	env, res, err := s.invokeIn(ctx, "", 30*time.Second, args)
@@ -127,6 +130,7 @@ func (s *Service) Legend(ctx context.Context, in LegendInput) (*Envelope, error)
 	}
 	unknownFlagNote(env, "--decompile", "0.2.0")
 	unknownFlagNote(env, "--bundle", "0.2.0")
+	unknownFlagNote(env, "--dart-snapshot", "0.5.0")
 	env.Result = map[string]any{
 		"topic": in.Topic,
 		"text":  string(res.Stdout),
@@ -145,3 +149,7 @@ const (
 	legendPlaceholder     = "LEGEND-ONLY-PLACEHOLDER"
 	legendPlaceholderNote = "the operands in argv are placeholders: this mode's legend sits behind a flag clap requires operands for, and Drakkar prints it before opening any input"
 )
+
+// Drakkar's own text is printed as it is, so the option it documents and this
+// server withholds is pointed out beside it rather than edited out of it.
+const legendDartCalibrateFileNote = "Drakkar's text documents --dart-calibrate-file, which this server does not expose: drakkar_dart_snapshot takes its witnesses through the calibrate field only, inline, so that every one of them is visible in the argv"

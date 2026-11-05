@@ -20,12 +20,12 @@ import (
 )
 
 // Instructions is handed to the client once, so that the envelope contract and
-// the path rules are not repeated in twenty-eight descriptions.
+// the path rules are not repeated in twenty-nine descriptions.
 const Instructions = `Drakkar is a static analysis engine for Android APKs and raw DEX files. Every tool here runs the drakkar binary found on PATH; this server never builds, installs or downloads it.
 
 Paths are parameters, given per call, and must be absolute — a relative one would be resolved against a working directory nobody chose. There is nothing to configure and no directory to declare in advance.
 
-Output goes where out_dir says. Omitted, the server makes a fresh directory under the system temp directory and returns its path in report_path, so a report never lands somewhere unpredictable. Call drakkar_version to see which Drakkar is in use and where that fallback is.
+Output goes where out_dir says. Two tools require it, drakkar_bundle and drakkar_dart_snapshot, and refuse a call without it. For every other tool, omitted, the server makes a fresh directory under the system temp directory and returns its path in report_path, so a report never lands somewhere unpredictable. Call drakkar_version to see which Drakkar is in use and where that fallback is.
 
 Every tool answers with the same envelope:
   drakkar     which Drakkar, the exact argv, the exit code, the duration, whether it timed out
@@ -56,6 +56,7 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Description: "Print Drakkar's own legend for a mode: the labels it emits and the rules it derives them by. " +
 			"These texts are where a metric's limits are stated — that orphan means unreferenced from code and not unused, that the near-class threshold is a parameter of the tool and not a published empirical value — so read the legend before interpreting a number from the matching mode. " +
 			"Topic native defines invalid_paths, invalid_paths_count and opaque_dead_code as drakkar_native reports them. " +
+			"Topic dart_snapshot defines heuristic, the values of layout_source, the keys of rejected and the calibration outcomes as drakkar_dart_snapshot reports them; it needs Drakkar 0.5.0. " +
 			"Reads no sample.",
 	}, r.legend)
 
@@ -100,6 +101,13 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"Covers lib/ only; a packer hiding a .so elsewhere in the archive shows up through drakkar_assets or drakkar_extract_libs. " +
 			"Text output, one APK at a time.",
 	}, r.nativeArch)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_dart_snapshot",
+		Description: "Read the Dart AOT snapshot blobs of a Flutter APK's lib/*/libapp.so, or of one raw ELF recognised by its magic: where each blob is, its header, its split into a serialized part and a data image, a heuristic enumeration of the data image's strings and, with calibrate witnesses, a layout calibration. " +
+			"The string entries never come back inline: they are in report_path, and each section's strings counters (entries_total, entries_returned, truncated) describe them. " +
+			"out_dir is required and Drakkar 0.5.0 is needed; drakkar_legend with topic dart_snapshot defines every field, heuristic, layout_source, the rejected keys and the calibration outcomes.",
+	}, r.dartSnapshot)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_strings",
@@ -284,6 +292,11 @@ func (r *registry) native(ctx context.Context, _ *mcp.CallToolRequest, in servic
 
 func (r *registry) nativeArch(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeArchInput) (*mcp.CallToolResult, *service.Envelope, error) {
 	env, err := r.svc.NativeArch(ctx, in)
+	return nil, env, err
+}
+
+func (r *registry) dartSnapshot(ctx context.Context, _ *mcp.CallToolRequest, in service.DartSnapshotInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	env, err := r.svc.DartSnapshot(ctx, in)
 	return nil, env, err
 }
 

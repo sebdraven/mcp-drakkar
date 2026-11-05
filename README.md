@@ -36,12 +36,14 @@ Paths are tool parameters, given per call, the way they are in a shell. They mus
 be **absolute** — a relative path would be resolved against the child's working
 directory, which is the call's output directory and not your shell.
 
-Output goes wherever the call's `out_dir` says. Omitted, the server makes a fresh
-directory under the system temp directory and returns its path in `report_path`.
-That fallback exists for one reason: Drakkar's own `--out` defaults to `./reports`
-*relative to the working directory*, which for a server started by an MCP client
-is arbitrary. The server never lets that default apply — it substitutes an
-absolute directory and says where it is.
+Output goes wherever the call's `out_dir` says. Two tools require it,
+`drakkar_bundle` and `drakkar_dart_snapshot`, and refuse a call without it. For
+every other tool, omitted, the server makes a fresh directory under the system
+temp directory and returns its path in `report_path`. That fallback exists for
+one reason: Drakkar's own `--out` defaults to `./reports` *relative to the
+working directory*, which for a server started by an MCP client is arbitrary.
+The server never lets that default apply — it substitutes an absolute directory
+and says where it is.
 
 Optional, all Go durations:
 `DRAKKAR_TIMEOUT_FAST` (2m), `DRAKKAR_TIMEOUT_DIFF` (10m),
@@ -56,12 +58,13 @@ refuses with the same message.
 | Tool | What it answers |
 |---|---|
 | `drakkar_version` | which Drakkar is in use, which one this server was written against, the timeouts, and where output lands by default |
-| `drakkar_legend` | Drakkar's own legend for a mode: where a metric's limits are stated; topic `native` covers `drakkar_native`, including its disasm labels |
+| `drakkar_legend` | Drakkar's own legend for a mode: where a metric's limits are stated; topic `native` covers `drakkar_native`, including its disasm labels, and topic `dart_snapshot` covers `drakkar_dart_snapshot` |
 | `drakkar_manifest` | permissions, components, intent filters, derived entry points |
 | `drakkar_cert` | signature schemes v1/v2/v3/v3.1 and the X.509 certificates |
 | `drakkar_dating` | raw dating indicators — no date is ever estimated |
 | `drakkar_native` | every ELF found by content, its JNI exports and tables, and the binding of DEX native methods to them; with `disasm`, the static disassembly of every JNI-bound function, `JNI_OnLoad` and the `init_array` constructors — JNIEnv calls decoded, PLT imports called, strings referenced — bounded by `disasm_depth` (0–3) and `disasm_max_insns` (1–20000), instructions left in `report.json`; each `disasm_functions` row counts its `invalid_paths` and each `elfs` row carries `invalid_paths_count` (null without `disasm` or before Drakkar 0.2.3), both defined by `drakkar_legend` topic `native` |
 | `drakkar_native_arch` | ABI, word size and machine of each `.so` under `lib/` |
+| `drakkar_dart_snapshot` | the Dart AOT snapshot blobs of a Flutter app's `libapp.so`: where each blob is, its header (`version_hash` whole, `kind`, `features`, `compressed_pointers`), the serialized / data image split, and per section the counts of a heuristic string enumeration whose entries stay in `report.json`; calibration is optional and needs witnesses, `out_dir` is required — see [below](#reading-a-flutter-snapshot) |
 | `drakkar_strings` | the DEX string pool, whole or filtered |
 | `drakkar_disasm` | selected classes disassembled with operands resolved |
 | `drakkar_decompile` | selected classes decompiled to Java by dex-decompiler, to check against `drakkar_disasm` |
@@ -99,11 +102,12 @@ about none of them.
 ### Reading a sample through its bundle
 
 `drakkar_decompile` and `drakkar_bundle` need Drakkar 0.2.0; against an older
-one they refuse with a message saying so. `drakkar_bundle` is the one tool whose
-`out_dir` is required: the bundle is a deliverable, written to
-`OUT/<sha256 of the input>/`, never to a temporary directory. The two readers run
-no analysis — they read that directory, and call nothing but `drakkar --version`,
-to refuse alongside the others when the Drakkar on `PATH` predates 0.2.0.
+one they refuse with a message saying so. `drakkar_bundle` is one of the two tools
+whose `out_dir` is required — the other is `drakkar_dart_snapshot`: the bundle is
+a deliverable, written to `OUT/<sha256 of the input>/`, never to a temporary
+directory. The two readers run no analysis — they read that directory, and call
+nothing but `drakkar --version`, to refuse alongside the others when the Drakkar
+on `PATH` predates 0.2.0.
 
 An agent that has to go through a sample does it in three steps:
 
@@ -141,6 +145,60 @@ From 0.3.0, `bundle.json` also carries `schema_version` (the version of the
 bundle's structure), `input_size` (bytes) and `rules_hash` (the whole SHA-256
 of the rule set and MITRE catalogue behind `rules.json`, null when `rules.json`
 is null). They come back unfiltered in `result.bundle`.
+
+### Reading a Flutter snapshot
+
+`drakkar_dart_snapshot` (Drakkar 0.5.0) reads the four `_kDart*Snapshot*` blobs
+of each `lib/*/libapp.so`, located by `.dynsym` or, failing that, by the snapshot
+magic — or of one raw ELF passed as `apk` and recognised by its magic. Nothing is
+extracted and nothing is executed.
+
+```text
+drakkar_dart_snapshot {"apk": "/corpus/flutter.apk", "out_dir": "/cases/2026-11/dart",
+                       "calibrate": ["Hello world", "api/v1/login", "Bearer "]}
+→ result.sha256, result.summary
+  tails.libraries: path, sha256, sections[], missing_symbols, strings_unavailable, anomalies
+  tails.errors
+  report_path = /cases/2026-11/dart/report.json
+```
+
+| Parameter | |
+|---|---|
+| `apk` | required, absolute: one APK, or one raw ELF |
+| `out_dir` | required, absolute, no fallback: `report.json` holds every string entry |
+| `max_rows` | Drakkar's `--dart-max-rows`, omitted unless set: how many entries per data image Drakkar writes into `report.json`, `0` for all. Never a preview size — the entries never come back inline |
+| `calibrate` | witnesses, repeatable: texts expected in clear in the data image, each one visible in the argv; an empty or blank witness is refused |
+
+Each row of `sections` carries `symbol`, `blob_index`, `file_offset`, `vaddr`,
+`size`, `elf_section`, the `header` (`magic_ok`, `length`, `kind`,
+`version_hash` whole, `known_version`, `features`, `compressed_pointers`,
+`errors`), the `serialized` and `data_image` spans, and for a data blob the
+counters of its string scan (`candidates`, `accepted`, `rejected`,
+`entries_total`, `entries_returned`, `truncated`) and `strings_unavailable`.
+
+**The string entries never come back inline.** A real Flutter APK yields more
+than 80 000 of them; they are in `report.json` under
+`libraries[].sections[].strings.entries`, and the counters say how many there are
+and whether `max_rows` cut them. The enumeration is heuristic and only runs for a
+snapshot version Drakkar knows or a layout calibration found.
+
+**Calibration is optional.** Without a witness no calibration runs, and the
+sections carry no `calibration` at all. With witnesses, each data blob gets one:
+`outcome`, `not_run_reason`, `witnesses_total`, `witnesses_found`,
+`witnesses_in_data_image`, `witnesses_explained`, `data_image_verdict`,
+`witness_zones` (the witnesses' occurrences summed per zone: serialized part,
+data image, outside), `inferred`, `word_size`, `known_version_literal`. `outcome`
+is `not_run` when witnesses were given but the blob's strings cannot be read, and
+`not_run_reason` says why; too few witnesses is `insufficient_witnesses`. The
+per-witness detail, and the evidence of each inferred layout, come back inline
+only when they are a handful; past that only the counts are here, and the detail
+is in `report.json`.
+
+`drakkar_legend` with topic `dart_snapshot` prints Drakkar's own definition of
+every field: what `heuristic` means, the values of `layout_source`, the keys of
+`rejected`, and the calibration outcomes (`calibrated`, `insufficient_witnesses`,
+`witness_not_found`, `witnesses_not_all_found`, `witnesses_outside_data_image`,
+`no_layout_explains_witnesses`, `ambiguous_layout`, `not_run`).
 
 ## The answer
 
@@ -209,9 +267,10 @@ terminal, and it never is here. One fewer duplicated default.
   to hold `VT_API_KEY` or `KOODOUS_TOKEN`. The child environment is built
   explicitly — `PATH`, `HOME`, `TMPDIR`, `RUST_LOG` — rather than inherited, so no
   token reaches Drakkar through it even if one is set here.
-- **`--assets-hash-file` and `--assets-hash-exclude-file`.** The hashes pass
-  inline instead, which keeps the filter visible in the `argv` the envelope
-  reports rather than hidden behind a file path.
+- **`--assets-hash-file`, `--assets-hash-exclude-file` and
+  `--dart-calibrate-file`.** The hashes and the calibration witnesses pass inline
+  instead, which keeps them visible in the `argv` the envelope reports rather
+  than hidden behind a file path.
 - **`--rules`.** Pointing the engine at a different rule directory is a
   bench-configuration decision, not a per-measurement one.
 - **`--matrix-top`.** It truncates the text ranking only; the JSON report carries
@@ -230,7 +289,7 @@ internal/drakkar/     the flag whitelist, the argv builder, the runner, the stde
                       marker parser, the TSV parsers
 internal/service/     one mode to one answer: output directory, head/tail split,
                       declared truncation, report writing
-internal/mcptools/    the 28 tools and their typed inputs
+internal/mcptools/    the 29 tools and their typed inputs
 internal/version/     what the server declares about itself
 ```
 
@@ -255,11 +314,11 @@ Nothing travels alongside the binary, so the binary answers for itself:
 
 ```
 $ mcp-drakkar -version
-mcp-drakkar 0.9.0
+mcp-drakkar 0.10.0
 commit:         <the full commit, injected at link time>
 target:         darwin/arm64
 go:             go1.27.1
-drakkar tested: 0.3.0 (b361caba436f2cbeafc01076a9e75272cf720dc4)
+drakkar tested: 0.5.0 (693379987c5cd9f8b2815510e7904b82b6fa040a)
 ```
 
 Only the commit is injected. `Version` and `DrakkarTested` are constants in
