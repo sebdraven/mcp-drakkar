@@ -68,6 +68,10 @@ func init() {
 	// --native-dex and --native-listing: Drakkar main, not yet in a tag
 	known["--native-dex"] = multiFlag
 	known["--native-listing"] = multiFlag
+	// --dart-snapshot and its options: Drakkar 0.5.0
+	known["--dart-snapshot"] = switchFlag
+	known["--dart-max-rows"] = valueFlag
+	known["--dart-calibrate"] = multiFlag
 	known["--extract-libs"] = switchFlag
 	known["--list-entries"] = switchFlag
 	known["--extract-entry"] = multiFlag

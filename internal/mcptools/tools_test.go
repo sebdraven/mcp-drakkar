@@ -18,6 +18,7 @@ var wantTools = []string{
 	"drakkar_bundle_class",
 	"drakkar_bundle_index",
 	"drakkar_cert",
+	"drakkar_dart_snapshot",
 	"drakkar_dating",
 	"drakkar_decompile",
 	"drakkar_diff_dex",
