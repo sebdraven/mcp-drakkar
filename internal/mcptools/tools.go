@@ -19,8 +19,11 @@ import (
 	"github.com/sebdraven/mcp-drakkar/internal/service"
 )
 
+// backgroundSentence closes the description of every tool that takes background.
+const backgroundSentence = " With background=true it runs as a job detached from the request and answers at once with a job_id: use it for anything that may outlast a minute, then poll drakkar_job_status."
+
 // Instructions is handed to the client once, so that the envelope contract and
-// the path rules are not repeated in twenty-nine descriptions.
+// the path rules are not repeated in thirty-two descriptions.
 const Instructions = `Drakkar is a static analysis engine for Android APKs and raw DEX files. Every tool here runs the drakkar binary found on PATH; this server never builds, installs or downloads it.
 
 Paths are parameters, given per call, and must be absolute — a relative one would be resolved against a working directory nobody chose. There is nothing to configure and no directory to declare in advance.
@@ -28,7 +31,7 @@ Paths are parameters, given per call, and must be absolute — a relative one wo
 Output goes where out_dir says. Two tools require it, drakkar_bundle and drakkar_dart_snapshot, and refuse a call without it. For every other tool, omitted, the server makes a fresh directory under the system temp directory and returns its path in report_path, so a report never lands somewhere unpredictable. Call drakkar_version to see which Drakkar is in use and where that fallback is.
 
 Every tool answers with the same envelope:
-  drakkar     which Drakkar, the exact argv, the exit code, the duration, whether it timed out
+  drakkar     which Drakkar, the exact argv, the exit code, the duration, whether it timed out, whether it was cancelled, and complete
   stderr      the whole of stderr verbatim, plus counts of Drakkar's [OK]/[FAIL]/[PANIC]/[AVERT] markers and the named failures
   result      the scalar head of the report: the measurement itself
   tails       one entry per unbounded array, each with total, returned, truncated and a preview
@@ -37,6 +40,10 @@ Every tool answers with the same envelope:
   notes       anything that changes how the numbers should be read
 
 Read stderr and notes before the numbers. A non-zero exit code or a non-zero failure count means entries are missing from the counts, and a truncated tail means the array was longer than the preview.
+
+drakkar.complete is true only when drakkar exited 0, did not time out, was not cancelled and its stdout was not cut. complete=false means partial output, whatever the files look like: a report list that is a prefix of the batch, a rows.json written from half a stdout. rows.json and lines.json carry the same complete flag.
+
+Any call that may run past a minute — a bulk directory, drakkar_diff_matrix, drakkar_diff_dex, drakkar_diff_explain, drakkar_decompile, drakkar_dart_snapshot, drakkar_bundle, drakkar_scan, drakkar_native with disasm — should pass background=true with an out_dir: a client or bridge that gives up on a request cancels it, and drakkar with it. The call then answers at once with a job_id; drakkar_job_status gives the state and, once the job has ended, the envelope. At most DRAKKAR_MAX_JOBS jobs run at once. Every call that ran drakkar leaves envelope.json in its output directory, the whole envelope: the on-disk record of what the call gave, even when the answer never reached the client.
 
 Flags with a Drakkar default are omitted unless you set them, so Drakkar decides. SHA-256 values are never truncated, here or anywhere in the output.`
 
@@ -64,21 +71,24 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Name: "drakkar_manifest",
 		Description: "Inventory the AndroidManifest.xml: permissions, components, intent filters and the entry points derived from them. " +
 			"Works on one APK or, with directory, over a whole batch, writing one report per sample. " +
-			"Derived entry points are the ones declared in the manifest; components reached only at runtime are drakkar_dyn_entrypoints, not this.",
+			"Derived entry points are the ones declared in the manifest; components reached only at runtime are drakkar_dyn_entrypoints, not this." +
+			backgroundSentence,
 	}, r.manifest)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_cert",
 		Description: "Inventory the signature: v1/v2/v3/v3.1 schemes and the X.509 certificates, with distinguished names, validity windows and fingerprints. " +
 			"Works on one APK or over a batch. " +
-			"A shared certificate ties two samples to the same signer; it says nothing on its own about shared code, which is what the diff tools measure.",
+			"A shared certificate ties two samples to the same signer; it says nothing on its own about shared code, which is what the diff tools measure." +
+			backgroundSentence,
 	}, r.cert)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_dating",
 		Description: "Raw dating indicators: signature dates, build-chain floors (DEX format, schemes, compileSdk, library versions), archive timestamps, date literals in the code, API targets. " +
 			"No date is ever estimated and no single figure is produced — these are the indicators, and reconciling them is the reader's job. " +
-			"Read drakkar_legend with topic dating before drawing a timeline from them.",
+			"Read drakkar_legend with topic dating before drawing a timeline from them." +
+			backgroundSentence,
 	}, r.dating)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -92,7 +102,8 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"Each disasm_functions row carries invalid_paths, how many invalid paths that function has (the objects themselves stay in report_path), and each elfs row carries invalid_paths_count, null without disasm or from a drakkar older than 0.2.3. " +
 			"With disasm, listing (<elf|*>@<hex address> or <elf|*>@<hex start>-<hex end>, end excluded) returns readable assembly inline: the listings tail, one entry per listing, with address, bytes, mnemonic, operands and a per-instruction comment, cut at max_rows instructions and flagged truncated per listing; a listing that cannot be produced is reported in errors. " +
 			"drakkar_legend with topic=native defines invalid_paths, invalid_paths_count and the opaque_dead_code anomaly. " +
-			"It extracts nothing: drakkar_extract_libs remains the tool for getting the files themselves. One APK or one raw ELF at a time.",
+			"It extracts nothing: drakkar_extract_libs remains the tool for getting the files themselves. One APK or one raw ELF at a time." +
+			backgroundSentence,
 	}, r.native)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -106,21 +117,24 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Name: "drakkar_dart_snapshot",
 		Description: "Read the Dart AOT snapshot blobs of a Flutter APK's lib/*/libapp.so, or of one raw ELF recognised by its magic: where each blob is, its header, its split into a serialized part and a data image, a heuristic enumeration of the data image's strings and, with calibrate witnesses, a layout calibration. " +
 			"The string entries never come back inline: they are in report_path, and each section's strings counters (entries_total, entries_returned, truncated) describe them. " +
-			"out_dir is required and Drakkar 0.5.0 is needed; drakkar_legend with topic dart_snapshot defines every field, heuristic, layout_source, the rejected keys and the calibration outcomes.",
+			"out_dir is required and Drakkar 0.5.0 is needed; drakkar_legend with topic dart_snapshot defines every field, heuristic, layout_source, the rejected keys and the calibration outcomes." +
+			backgroundSentence,
 	}, r.dartSnapshot)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_strings",
 		Description: "Read the DEX string pool, whole or filtered by case-insensitive substring. Accepts an APK or a raw DEX, one sample or a whole directory. " +
 			"This is the literal pool, so it holds what instructions never write: the value of a static final String lives here and nowhere else. " +
-			"stderr reports how many strings were read against how many the header declared, and how many were unreadable — a gap there means a damaged DEX, not an absence of strings.",
+			"stderr reports how many strings were read against how many the header declared, and how many were unreadable — a gap there means a damaged DEX, not an absence of strings." +
+			backgroundSentence,
 	}, r.strings)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_disasm",
 		Description: "Disassemble the classes whose Dalvik descriptor matches a pattern, with indexed operands resolved to plain strings, types, methods and fields. " +
 			"This is the complement to drakkar_diff_dex, which is blind to operands. It is not a decompiler: no control flow is reconstructed and no types are inferred. " +
-			"Text output, one sample at a time, meant to be read and diffed as it stands.",
+			"Text output, one sample at a time, meant to be read and diffed as it stands." +
+			backgroundSentence,
 	}, r.disasm)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -128,7 +142,8 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Description: "Decompile to Java the classes whose Dalvik descriptor matches a pattern — the same case-insensitive substring selection as drakkar_disasm, every class when no pattern is given. Accepts an APK or a raw DEX recognised by content. " +
 			"The Java comes from dex-decompiler, a young decompiler: when a line matters, check it against drakkar_disasm, which shows the bytecode with operands resolved. " +
 			"A class headed `// repli méthode par méthode` is one where decompile_class failed: what follows is the per-method rendering, without fields, imports or inner classes, and stderr counts them. " +
-			"The whole Java is written to decompiled.java; only max_chars of it come back inline. Needs Drakkar 0.2.0.",
+			"The whole Java is written to decompiled.java; only max_chars of it come back inline. Needs Drakkar 0.2.0." +
+			backgroundSentence,
 	}, r.decompile)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -138,7 +153,8 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"out_dir is required, and an existing bundle of the same input is refused unless overwrite is set. Like drakkar_scan it loads the MITRE catalogue, so a first call after a cache miss reaches the network. A part that fails is null in its file and recorded in errors.json rather than stopping the bundle. " +
 			"bundle.json carries schema_version (the version of the bundle's structure, raised on any incompatible change), input_size (the input's size in bytes) and rules_hash (the whole SHA-256 of the rule set and MITRE catalogue behind rules.json, null when rules.json is null); a Drakkar older than 0.3.0 writes none of the three. " +
 			"With archive, Drakkar also writes out_dir/<sha256>.bundle.zip: the whole bundle directory, every entry under <sha256>/, byte-identical for identical directory content. That .bundle.zip is the file to upload to an import service. The answer then gains archive_path, archive_size (bytes) and archive_sha256 (whole), as Drakkar reports them; overwrite also replaces an existing archive, or deletes it when archive is not set; without overwrite an existing one is refused. " +
-			"drakkar_legend with topic bundle defines every file and field. Needs Drakkar 0.2.0; archive needs Drakkar 0.3.0, and an older one refuses the flag with a message that comes back as is.",
+			"drakkar_legend with topic bundle defines every file and field. Needs Drakkar 0.2.0; archive needs Drakkar 0.3.0, and an older one refuses the flag with a message that comes back as is." +
+			backgroundSentence,
 	}, r.bundle)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -160,49 +176,56 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Name: "drakkar_dyn_entrypoints",
 		Description: "Find the component classes reached other than by a manifest declaration: registerReceiver, startActivity, startService, bindService, new Intent(ctx, X.class), setClass, setComponent, Class.forName. " +
 			"Accepts an APK or a raw DEX recognised by content, which is what lets you pass the unpacked DEX of a packed sample. " +
-			"Unresolved call sites are reported alongside the resolved ones, with the reason they could not be resolved: they are not failures, they are the part the measure does not reach.",
+			"Unresolved call sites are reported alongside the resolved ones, with the reason they could not be resolved: they are not failures, they are the part the measure does not reach." +
+			backgroundSentence,
 	}, r.dynEntrypoints)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_reflection_inputs",
 		Description: "Classify where the NAME of each reflection target comes from: const, decrypt-const, runtime, param, indirect, unknown, over Method.invoke, Class.forName, getMethod and getDeclaredMethod. " +
 			"The decrypt-const to runtime ratio is what says whether a replayable deobfuscation pass is worth building. " +
-			"Every category is reported even at zero, so counts stay comparable between samples.",
+			"Every category is reported even at zero, so counts stay comparable between samples." +
+			backgroundSentence,
 	}, r.reflectionInputs)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_api_surface",
 		Description: "Read the network protocol the sample DECLARES: the HTTP verb and route template of each Retrofit method, the names its @Path, @Query, @Body, @Header, @Field and @Part parameters bind to, and the wire key of each Gson @SerializedName field. " +
 			"This reads annotations and no instruction at all, so it sees what no bytecode sweep reaches — on a Retrofit client the routes exist only here — and misses what is built at runtime, which is drakkar_strings' half of the job. " +
-			"An empty answer means not Retrofit, or Retrofit repackaged under another package name; it never means the sample has no HTTP routes. Weigh other_annotations against annotations_seen in the head to tell those two apart.",
+			"An empty answer means not Retrofit, or Retrofit repackaged under another package name; it never means the sample has no HTTP routes. Weigh other_annotations against annotations_seen in the head to tell those two apart." +
+			backgroundSentence,
 	}, r.apiSurface)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_orphan_audit",
 		Description: "Partition the methods unreachable from the entry points into weakly connected components and flag those containing System.loadLibrary. " +
 			"Root saturation is measured in four stages — manifest, then dynamic, then UI handlers, then clinit — and only what survives the last stage is the interpretable residue. " +
-			"Without a manifest the roots are heuristic, which the report states as roots_mode: a heuristic measure is not comparable with a manifest one.",
+			"Without a manifest the roots are heuristic, which the report states as roots_mode: a heuristic measure is not comparable with a manifest one." +
+			backgroundSentence,
 	}, r.orphanAudit)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_probe_api",
 		Description: "Ask whether one precise API is a node of the call graph and whether it is reachable from the roots, with the paths as evidence. " +
 			"Takes a substring of class->name, for example System;->loadLibrary. " +
-			"Use it to check a single hypothesis; use drakkar_orphan_audit for the shape of the whole graph.",
+			"Use it to check a single hypothesis; use drakkar_orphan_audit for the shape of the whole graph." +
+			backgroundSentence,
 	}, r.probeAPI)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_diff_dex",
 		Description: "Compare two DEX or APK by opcode fingerprint, to answer whether they come from the same source tree despite package renaming and ProGuard: only the mnemonic sequence of each method is kept. " +
 			"It is blind to operands by construction, so two builds differing only in a C2 endpoint look identical here — pair it with drakkar_diff_explain and drakkar_diff_strings. " +
-			"Classes paired by fingerprint alone with different names are real renamings, but that bucket is also where POJOs with identical fingerprints can be mismatched: a high count there without an expected renaming deserves suspicion.",
+			"Classes paired by fingerprint alone with different names are real renamings, but that bucket is also where POJOs with identical fingerprints can be mismatched: a high count there without an expected renaming deserves suspicion." +
+			backgroundSentence,
 	}, r.diffDex)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_diff_explain",
 		Description: "Compare the resolved operands of methods that share an opcode fingerprint, index by index, and categorise each divergence: string, method target, type, real field, renamed field. " +
 			"This closes drakkar_diff_dex's blind spot. Between two separately obfuscated batches, pass normalize or every operand diverges on the namespace alone and the output is noise. " +
-			"Static field values are compared by name and counted, but unpaired ones are never reported as divergences, because a field-name remapping would produce them in bulk.",
+			"Static field values are compared by name and counted, but unpaired ones are never reported as divergences, because a field-name remapping would produce them in bulk." +
+			backgroundSentence,
 	}, r.diffExplain)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -216,21 +239,24 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Name: "drakkar_diff_matrix",
 		Description: "Score every pair in a directory of APKs or DEX against every other, then group by single linkage. Each sample is parsed once and the comparisons run on in-memory sets, which is what makes all-against-all tractable over a corpus. " +
 			"Both metrics are always computed; metric selects which one drives the matrix and the grouping — opcodes for same engine, strings for same constants. " +
-			"The result is n-squared: the pairs come back as a declared preview of the ranking, and the whole matrix stays on disk. Samples that could not be read are named in failed rather than being quietly absent.",
+			"The result is n-squared: the pairs come back as a declared preview of the ranking, and the whole matrix stays on disk. Samples that could not be read are named in failed rather than being quietly absent." +
+			backgroundSentence,
 	}, r.diffMatrix)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_resources",
 		Description: "Read resources.arsc: resolve names or identifiers, dump the table, join DEX constants to the resource entries they really designate (xref), or list the resources no DEX constant references (orphans). " +
 			"orphans means unreferenced FROM THE CODE, never unused: a resource cited by a layout, a style, a theme or the manifest appears here and is perfectly used. " +
-			"xref reports one row per usage with its origin and consumer, and its end-of-pass summary is what lets you bound the false positive rate.",
+			"xref reports one row per usage with its origin and consumer, and its end-of-pass summary is what lets you bound the false positive rate." +
+			backgroundSentence,
 	}, r.resources)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_assets",
 		Description: "Inventory, fingerprint or extract the assets/ entries: path, sizes, declared method, whole SHA-256, type sniffed from the leading bytes rather than the extension, and entropy. " +
 			"Falls back to a tolerant reader when the zip crate refuses the archive, which is what keeps tampered APKs from coming back with no assets at all. " +
-			"Filter by hash to pivot on a known payload; the fingerprint is only emitted when it covers every asset, and says why when it does not. An asset that is itself a ZIP, APK or DEX is typed and written as-is, never unpacked recursively.",
+			"Filter by hash to pivot on a known payload; the fingerprint is only emitted when it covers every asset, and says why when it does not. An asset that is itself a ZIP, APK or DEX is typed and written as-is, never unpacked recursively." +
+			backgroundSentence,
 	}, r.assets)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -256,8 +282,36 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Name: "drakkar_scan",
 		Description: "Run the rule engine and return the MITRE ATT&CK for Mobile detections. One APK, raw DEX or archive without AndroidManifest.xml, or a whole directory with one report per sample. " +
 			"Unlike every other tool here but drakkar_bundle, this one loads the MITRE catalogue, so a first call after a cache miss reaches the network; refresh forces that download. " +
-			"It is the heaviest mode: the inventory and measurement tools answer most questions without building the call graph.",
+			"It is the heaviest mode: the inventory and measurement tools answer most questions without building the call graph." +
+			backgroundSentence,
 	}, r.scan)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_job_status",
+		Description: "Report a background job by job_id, from this server's registry, or by out_dir, from the job.json and envelope.json written there, which also works after a restart of the server. " +
+			"Gives the state (running, done, failed, cancelled), the elapsed time and, once the job has ended, the envelope the original tool built, cut by that call's max_rows. " +
+			"done means drakkar ran to an end, not that the run was whole: read envelope.drakkar.complete. A job.json still at running that no server holds any more is reported as orphaned: its output is partial and nothing will finish it.",
+	}, r.jobStatus)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_job_cancel",
+		Description: "Cancel a running background job by job_id: its context is cancelled, which kills drakkar, and the answer waits a bounded time for the job to end as cancelled. " +
+			"envelope.json is still written, with drakkar.cancelled=true and complete=false, so what the job had produced stays readable and is never mistaken for a whole run. " +
+			"Only the server process that started a job can cancel it.",
+	}, r.jobCancel)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_job_list",
+		Description: "List the background jobs this server process knows of, oldest first, with state, tool, out_dir, argv and timestamps, plus how many are running against DRAKKAR_MAX_JOBS. " +
+			"No envelope: drakkar_job_status gives that for one job. Jobs from an earlier server process are not listed; their job.json in out_dir is.",
+	}, r.jobList)
+}
+
+// run sends every call that invokes drakkar through Service.Do, which writes
+// envelope.json and detaches the call when background is set.
+func (r *registry) run(ctx context.Context, c service.Call, fn func(context.Context) (*service.Envelope, error)) (*mcp.CallToolResult, *service.Envelope, error) {
+	env, err := r.svc.Do(ctx, c, fn)
+	return nil, env, err
 }
 
 func (r *registry) version(ctx context.Context, _ *mcp.CallToolRequest, in service.VersionInput) (*mcp.CallToolResult, *service.Envelope, error) {
@@ -271,53 +325,63 @@ func (r *registry) legend(ctx context.Context, _ *mcp.CallToolRequest, in servic
 }
 
 func (r *registry) manifest(ctx context.Context, _ *mcp.CallToolRequest, in service.InventoryInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.Manifest(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_manifest", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.Manifest(ctx, in)
+	})
 }
 
 func (r *registry) cert(ctx context.Context, _ *mcp.CallToolRequest, in service.InventoryInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.Cert(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_cert", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.Cert(ctx, in)
+	})
 }
 
 func (r *registry) dating(ctx context.Context, _ *mcp.CallToolRequest, in service.InventoryInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.Dating(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_dating", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.Dating(ctx, in)
+	})
 }
 
 func (r *registry) native(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.Native(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_native", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.Native(ctx, in)
+	})
 }
 
 func (r *registry) nativeArch(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeArchInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.NativeArch(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_native_arch"}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.NativeArch(ctx, in)
+	})
 }
 
 func (r *registry) dartSnapshot(ctx context.Context, _ *mcp.CallToolRequest, in service.DartSnapshotInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.DartSnapshot(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_dart_snapshot", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.DartSnapshot(ctx, in)
+	})
 }
 
 func (r *registry) strings(ctx context.Context, _ *mcp.CallToolRequest, in service.StringsInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.Strings(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_strings", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.Strings(ctx, in)
+	})
 }
 
 func (r *registry) disasm(ctx context.Context, _ *mcp.CallToolRequest, in service.DisasmInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.Disasm(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_disasm", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.Disasm(ctx, in)
+	})
 }
 
 func (r *registry) decompile(ctx context.Context, _ *mcp.CallToolRequest, in service.DecompileInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.Decompile(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_decompile", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.Decompile(ctx, in)
+	})
 }
 
 func (r *registry) bundle(ctx context.Context, _ *mcp.CallToolRequest, in service.BundleInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.Bundle(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_bundle", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.Bundle(ctx, in)
+	})
 }
 
 func (r *registry) bundleIndex(ctx context.Context, _ *mcp.CallToolRequest, in service.BundleIndexInput) (*mcp.CallToolResult, *service.Envelope, error) {
@@ -331,76 +395,106 @@ func (r *registry) bundleClass(ctx context.Context, _ *mcp.CallToolRequest, in s
 }
 
 func (r *registry) dynEntrypoints(ctx context.Context, _ *mcp.CallToolRequest, in service.DynEntrypointsInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.DynEntrypoints(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_dyn_entrypoints", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.DynEntrypoints(ctx, in)
+	})
 }
 
 func (r *registry) reflectionInputs(ctx context.Context, _ *mcp.CallToolRequest, in service.ReflectionInputsInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.ReflectionInputs(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_reflection_inputs", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.ReflectionInputs(ctx, in)
+	})
 }
 
 func (r *registry) apiSurface(ctx context.Context, _ *mcp.CallToolRequest, in service.APISurfaceInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.APISurface(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_api_surface", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.APISurface(ctx, in)
+	})
 }
 
 func (r *registry) orphanAudit(ctx context.Context, _ *mcp.CallToolRequest, in service.OrphanAuditInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.OrphanAudit(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_orphan_audit", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.OrphanAudit(ctx, in)
+	})
 }
 
 func (r *registry) probeAPI(ctx context.Context, _ *mcp.CallToolRequest, in service.ProbeInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.Probe(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_probe_api", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.Probe(ctx, in)
+	})
 }
 
 func (r *registry) diffDex(ctx context.Context, _ *mcp.CallToolRequest, in service.DiffDexInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.DiffDex(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_diff_dex", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.DiffDex(ctx, in)
+	})
 }
 
 func (r *registry) diffExplain(ctx context.Context, _ *mcp.CallToolRequest, in service.DiffExplainInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.DiffExplain(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_diff_explain", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.DiffExplain(ctx, in)
+	})
 }
 
 func (r *registry) diffStrings(ctx context.Context, _ *mcp.CallToolRequest, in service.DiffStringsInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.DiffStrings(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_diff_strings"}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.DiffStrings(ctx, in)
+	})
 }
 
 func (r *registry) diffMatrix(ctx context.Context, _ *mcp.CallToolRequest, in service.DiffMatrixInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.DiffMatrix(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_diff_matrix", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.DiffMatrix(ctx, in)
+	})
 }
 
 func (r *registry) resources(ctx context.Context, _ *mcp.CallToolRequest, in service.ResourcesInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.Resources(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_resources", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.Resources(ctx, in)
+	})
 }
 
 func (r *registry) assets(ctx context.Context, _ *mcp.CallToolRequest, in service.AssetsInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.Assets(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_assets", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.Assets(ctx, in)
+	})
 }
 
 func (r *registry) listEntries(ctx context.Context, _ *mcp.CallToolRequest, in service.ListEntriesInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.ListEntries(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_list_entries"}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.ListEntries(ctx, in)
+	})
 }
 
 func (r *registry) extractEntry(ctx context.Context, _ *mcp.CallToolRequest, in service.ExtractEntryInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.ExtractEntry(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_extract_entry"}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.ExtractEntry(ctx, in)
+	})
 }
 
 func (r *registry) extractLibs(ctx context.Context, _ *mcp.CallToolRequest, in service.ExtractLibsInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.ExtractLibs(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_extract_libs"}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.ExtractLibs(ctx, in)
+	})
 }
 
 func (r *registry) scan(ctx context.Context, _ *mcp.CallToolRequest, in service.ScanInput) (*mcp.CallToolResult, *service.Envelope, error) {
-	env, err := r.svc.Scan(ctx, in)
-	return nil, env, err
+	return r.run(ctx, service.Call{Tool: "drakkar_scan", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.Scan(ctx, in)
+	})
+}
+
+func (r *registry) jobStatus(ctx context.Context, _ *mcp.CallToolRequest, in service.JobStatusInput) (*mcp.CallToolResult, *service.JobView, error) {
+	st, err := r.svc.JobStatus(ctx, in)
+	return nil, st, err
+}
+
+func (r *registry) jobCancel(ctx context.Context, _ *mcp.CallToolRequest, in service.JobCancelInput) (*mcp.CallToolResult, *service.JobView, error) {
+	st, err := r.svc.JobCancel(ctx, in)
+	return nil, st, err
+}
+
+func (r *registry) jobList(ctx context.Context, _ *mcp.CallToolRequest, in service.JobListInput) (*mcp.CallToolResult, *service.JobRegistry, error) {
+	list, err := r.svc.JobList(ctx, in)
+	return nil, list, err
 }
