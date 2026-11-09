@@ -33,6 +33,7 @@ type Result struct {
 	ExitCode        int
 	DurationMS      int64
 	TimedOut        bool
+	Cancelled       bool
 	StdoutTruncated bool
 	StderrTruncated bool
 }
@@ -86,9 +87,9 @@ func (r *Runner) Lookup() (string, error) {
 // error: it is reported in Result so the caller can hand back stdout, stderr and
 // the code together. Only a failure to start is an error.
 //
-// On timeout the child is killed and whatever it had already written is still
-// returned. Discarding partial output on the way out is how a scan gets read as
-// a clean result.
+// On timeout or cancellation the child is killed and whatever it had already
+// written is still returned. Discarding partial output on the way out is how a
+// scan gets read as a clean result.
 func (r *Runner) Run(ctx context.Context, timeout time.Duration, argv []string) (*Result, error) {
 	path, err := r.Lookup()
 	if err != nil {
@@ -125,12 +126,16 @@ func (r *Runner) Run(ctx context.Context, timeout time.Duration, argv []string) 
 	runErr := cmd.Run()
 	elapsed := time.Since(start)
 
+	// A child that exited on its own is a complete run, even if the context
+	// ended a moment later.
+	killed := runErr != nil
 	res := &Result{
 		Argv:            append([]string{path}, argv...),
 		Stdout:          out.buf.Bytes(),
 		Stderr:          errBuf.buf.String(),
 		DurationMS:      elapsed.Milliseconds(),
-		TimedOut:        errors.Is(runCtx.Err(), context.DeadlineExceeded),
+		TimedOut:        killed && errors.Is(runCtx.Err(), context.DeadlineExceeded),
+		Cancelled:       killed && errors.Is(runCtx.Err(), context.Canceled),
 		StdoutTruncated: out.truncated,
 		StderrTruncated: errBuf.truncated,
 	}
@@ -139,10 +144,10 @@ func (r *Runner) Run(ctx context.Context, timeout time.Duration, argv []string) 
 	switch {
 	case runErr == nil:
 		res.ExitCode = 0
+	case res.TimedOut || res.Cancelled:
+		res.ExitCode = -1
 	case errors.As(runErr, &exitErr):
 		res.ExitCode = exitErr.ExitCode()
-	case res.TimedOut:
-		res.ExitCode = -1
 	default:
 		return res, fmt.Errorf("running %s: %w", path, runErr)
 	}
