@@ -2,6 +2,7 @@ package mcptools
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -29,6 +30,9 @@ var wantTools = []string{
 	"drakkar_dyn_entrypoints",
 	"drakkar_extract_entry",
 	"drakkar_extract_libs",
+	"drakkar_job_cancel",
+	"drakkar_job_list",
+	"drakkar_job_status",
 	"drakkar_legend",
 	"drakkar_list_entries",
 	"drakkar_manifest",
@@ -138,9 +142,44 @@ func TestInstructionsStateTheEnvelopeAndThePathRules(t *testing.T) {
 		"out_dir",
 		"never builds",
 		"drakkar_version",
+		"cancelled",
+		"complete=false",
+		"background",
+		"drakkar_job_status",
+		"envelope.json",
 	} {
 		if !strings.Contains(Instructions, want) {
 			t.Errorf("the instructions do not mention %q", want)
+		}
+	}
+}
+
+// The tools that can run long are the ones a bridge cuts off, so each has to
+// offer background and say so.
+func TestLongToolsTakeBackground(t *testing.T) {
+	got := listTools(t, connect(t))
+	for _, name := range []string{
+		"drakkar_manifest", "drakkar_cert", "drakkar_dating", "drakkar_strings",
+		"drakkar_dyn_entrypoints", "drakkar_reflection_inputs", "drakkar_api_surface",
+		"drakkar_orphan_audit", "drakkar_resources", "drakkar_assets", "drakkar_scan",
+		"drakkar_diff_matrix", "drakkar_bundle", "drakkar_native",
+		"drakkar_diff_dex", "drakkar_diff_explain", "drakkar_decompile",
+		"drakkar_disasm", "drakkar_probe_api", "drakkar_dart_snapshot",
+	} {
+		tool, ok := got[name]
+		if !ok {
+			t.Errorf("tool %q is missing", name)
+			continue
+		}
+		schema, err := json.Marshal(tool.InputSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(schema), `"background"`) {
+			t.Errorf("tool %q has no background parameter", name)
+		}
+		if !strings.Contains(tool.Description, "drakkar_job_status") {
+			t.Errorf("tool %q does not say how to follow a background call", name)
 		}
 	}
 }
