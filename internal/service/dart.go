@@ -20,6 +20,8 @@ type DartSnapshotInput struct {
 	MaxRows   *int     `json:"max_rows,omitempty" jsonschema:"passed to Drakkar as --dart-max-rows: how many string entries per data image Drakkar writes into report.json, 0 for all of them; omitted, Drakkar's own default applies. The entries never come back inline, whatever this is"`
 	Calibrate []string `json:"calibrate,omitempty" jsonschema:"calibration witnesses, each the text of a string expected in clear in the data image; repeatable, each one visible in the argv. Optional: without a witness no calibration runs"`
 
+	Background bool `json:"background,omitempty" jsonschema:"run as a job detached from this request and answer at once with a job_id; out_dir is then required, and drakkar_job_status gives the outcome"`
+
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
 }
 

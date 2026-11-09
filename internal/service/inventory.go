@@ -15,6 +15,8 @@ type InventoryInput struct {
 
 	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
+	Background bool `json:"background,omitempty" jsonschema:"run as a job detached from this request and answer at once with a job_id; out_dir is then required, and drakkar_job_status gives the outcome"`
+
 	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"in bulk, how many per-sample reports to return inline; the rest stay on disk"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
 }

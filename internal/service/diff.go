@@ -24,6 +24,8 @@ type DiffDexInput struct {
 
 	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
+	Background bool `json:"background,omitempty" jsonschema:"run as a job detached from this request and answer at once with a job_id; out_dir is then required, and drakkar_job_status gives the outcome"`
+
 	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many entries of each array to return inline; the whole report stays on disk"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
 }
@@ -121,6 +123,8 @@ type DiffExplainInput struct {
 
 	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
+	Background bool `json:"background,omitempty" jsonschema:"run as a job detached from this request and answer at once with a job_id; out_dir is then required, and drakkar_job_status gives the outcome"`
+
 	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many entries of each array to return inline; the whole report stays on disk"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
 }
@@ -172,6 +176,8 @@ type DiffMatrixInput struct {
 	Threshold *float64 `json:"threshold,omitempty" jsonschema:"single-linkage grouping threshold; omit to leave Drakkar's own value in force"`
 
 	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
+
+	Background bool `json:"background,omitempty" jsonschema:"run as a job detached from this request and answer at once with a job_id; out_dir is then required, and drakkar_job_status gives the outcome"`
 
 	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many pairs and samples to return inline; the whole n-squared matrix stays on disk"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call; an all-against-all run over a hundred samples takes a while"`

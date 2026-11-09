@@ -19,6 +19,8 @@ type NativeInput struct {
 
 	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
+	Background bool `json:"background,omitempty" jsonschema:"run as a job detached from this request and answer at once with a job_id; out_dir is then required, and drakkar_job_status gives the outcome"`
+
 	Disasm         bool     `json:"disasm,omitempty" jsonschema:"also disassemble, statically, every JNI-bound function, JNI_OnLoad and the init_array constructors, decoding JNIEnv calls, PLT imports called and referenced strings; adds the disasm_functions, upcalls and registered_by_code tails, and the instructions themselves stay in report_path"`
 	DisasmDepth    *int     `json:"disasm_depth,omitempty" jsonschema:"with disasm only: how deep to follow local calls from each disassembled function, 0 to 3; omitted, Drakkar's default"`
 	DisasmMaxInsns *int     `json:"disasm_max_insns,omitempty" jsonschema:"with disasm only: instruction budget per function, 1 to 20000, past which the function is marked truncated; omitted, Drakkar's default"`
