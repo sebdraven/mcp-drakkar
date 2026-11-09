@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -59,15 +60,29 @@ func durationEnv(key string, fallback time.Duration) time.Duration {
 	return d
 }
 
+func intEnv(key string, fallback int) int {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
+}
+
 type Service struct {
 	timeouts Timeouts
+	jobs     *jobs
 
 	mu      sync.Mutex
 	version string
 }
 
+// New reads DRAKKAR_MAX_JOBS, the ceiling on background jobs running at once.
 func New(t Timeouts) *Service {
-	return &Service{timeouts: t}
+	return &Service{timeouts: t, jobs: newJobs(intEnv("DRAKKAR_MAX_JOBS", defaultMaxJobs))}
 }
 
 // timeout picks the class timeout unless the caller overrode it.
@@ -89,7 +104,15 @@ func (s *Service) begin(tool, requested string) (*outDir, error) {
 // own lands somewhere named rather than wherever the MCP client happened to
 // start the server.
 func (s *Service) invoke(ctx context.Context, out *outDir, timeout time.Duration, args *drakkar.Args) (*Envelope, *drakkar.Result, error) {
-	return s.invokeIn(ctx, out.path, timeout, args)
+	c := callOf(ctx)
+	if argv, err := args.Argv(); err == nil {
+		c.starting(out.path, append([]string{drakkar.Bin}, argv...))
+	}
+	env, res, err := s.invokeIn(ctx, out.path, timeout, args)
+	if env != nil {
+		c.ran(env)
+	}
+	return env, res, err
 }
 
 // invokeIn is the same for the two modes that need no output directory at all:

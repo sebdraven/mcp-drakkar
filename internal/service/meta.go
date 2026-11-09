@@ -37,6 +37,7 @@ func (s *Service) Version(ctx context.Context, _ VersionInput) (*Envelope, error
 		"server_commit":  version.Commit,
 		"drakkar_tested": version.DrakkarTested,
 		"timeouts":       timeouts,
+		"max_jobs":       s.jobs.limit,
 		// Where output lands when a call names no out_dir. There is no configured
 		// perimeter: inputs are absolute paths given per call.
 		"default_out_parent": os.TempDir(),
