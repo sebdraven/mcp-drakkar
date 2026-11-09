@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -59,15 +60,29 @@ func durationEnv(key string, fallback time.Duration) time.Duration {
 	return d
 }
 
+func intEnv(key string, fallback int) int {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
+}
+
 type Service struct {
 	timeouts Timeouts
+	jobs     *jobs
 
 	mu      sync.Mutex
 	version string
 }
 
+// New reads DRAKKAR_MAX_JOBS, the ceiling on background jobs running at once.
 func New(t Timeouts) *Service {
-	return &Service{timeouts: t}
+	return &Service{timeouts: t, jobs: newJobs(intEnv("DRAKKAR_MAX_JOBS", defaultMaxJobs))}
 }
 
 // timeout picks the class timeout unless the caller overrode it.
@@ -89,7 +104,15 @@ func (s *Service) begin(tool, requested string) (*outDir, error) {
 // own lands somewhere named rather than wherever the MCP client happened to
 // start the server.
 func (s *Service) invoke(ctx context.Context, out *outDir, timeout time.Duration, args *drakkar.Args) (*Envelope, *drakkar.Result, error) {
-	return s.invokeIn(ctx, out.path, timeout, args)
+	c := callOf(ctx)
+	if argv, err := args.Argv(); err == nil {
+		c.starting(out.path, append([]string{drakkar.Bin}, argv...))
+	}
+	env, res, err := s.invokeIn(ctx, out.path, timeout, args)
+	if env != nil {
+		c.ran(env)
+	}
+	return env, res, err
 }
 
 // invokeIn is the same for the two modes that need no output directory at all:
@@ -105,15 +128,18 @@ func (s *Service) invokeIn(ctx context.Context, workDir string, timeout time.Dur
 		return nil, nil, err
 	}
 
+	// A cancelled call still has to say which Drakkar produced its fragment.
 	meta := Meta{
 		Server:          version.Version,
-		Version:         s.drakkarVersion(ctx, runner),
+		Version:         s.drakkarVersion(context.WithoutCancel(ctx), runner),
 		Tested:          version.DrakkarTested,
 		Argv:            res.Argv,
 		ExitCode:        res.ExitCode,
 		DurationMS:      res.DurationMS,
 		TimedOut:        res.TimedOut,
+		Cancelled:       res.Cancelled,
 		StdoutTruncated: res.StdoutTruncated,
+		Complete:        res.ExitCode == 0 && !res.TimedOut && !res.Cancelled && !res.StdoutTruncated,
 	}
 	env := &Envelope{
 		Drakkar: meta,
@@ -122,13 +148,16 @@ func (s *Service) invokeIn(ctx context.Context, workDir string, timeout time.Dur
 	if res.TimedOut {
 		env.note(fmt.Sprintf("timed out after %s and was killed; stdout and stderr are what the child had already written, not a complete run", timeout))
 	}
+	if res.Cancelled {
+		env.note("the request was cancelled by the client or the bridge and drakkar was killed; stdout, stderr and anything written to disk are partial, not a complete run")
+	}
 	if res.StdoutTruncated {
 		env.note("stdout hit the capture ceiling and was cut; the report on disk, if any, is complete but what was parsed here is not")
 	}
 	if res.StderrTruncated {
 		env.note("stderr hit the capture ceiling and was cut; the marker counts below are lower bounds")
 	}
-	if res.ExitCode != 0 && !res.TimedOut {
+	if res.ExitCode != 0 && !res.TimedOut && !res.Cancelled {
 		env.note(fmt.Sprintf("drakkar exited %d; read stderr.text before reading anything else", res.ExitCode))
 	}
 	if n := env.Stderr.FailedEntries(); n > 0 {
@@ -170,6 +199,10 @@ func (s *Service) finishJSON(env *Envelope, path, rootName string, inline []stri
 	}
 	var doc any
 	if err := json.Unmarshal(raw, &doc); err != nil {
+		if !env.Drakkar.Complete {
+			env.note(fmt.Sprintf("the report at %s could not be parsed, which is consistent with a run that did not complete: %v", path, err))
+			return nil
+		}
 		return fmt.Errorf("parsing %s: %w", path, err)
 	}
 	head, tails := Split(doc, rootName, inline, maxRows)
@@ -191,6 +224,10 @@ func (s *Service) finishJSONStdout(env *Envelope, out *outDir, stdout []byte, ro
 	}
 	var doc any
 	if err := json.Unmarshal(stdout, &doc); err != nil {
+		if !env.Drakkar.Complete {
+			env.note(fmt.Sprintf("the JSON on stdout could not be parsed, which is consistent with a run that did not complete: %v", err))
+			return nil
+		}
 		return fmt.Errorf("parsing the JSON Drakkar printed: %w", err)
 	}
 	path, err := out.file("report.json")
@@ -227,6 +264,8 @@ func (s *Service) finishTable(env *Envelope, out *outDir, stdout []byte, maxRows
 		"header":    table.Header,
 		"rows":      objects,
 		"malformed": table.Malformed,
+		"complete":  env.Drakkar.Complete,
+		"drakkar":   env.Drakkar.runState(),
 	}); err != nil {
 		return nil, err
 	}
@@ -261,7 +300,11 @@ func (s *Service) finishLines(env *Envelope, out *outDir, stdout []byte, maxRows
 	if err != nil {
 		return err
 	}
-	if err := writeJSON(path, lines); err != nil {
+	if err := writeJSON(path, map[string]any{
+		"lines":    lines,
+		"complete": env.Drakkar.Complete,
+		"drakkar":  env.Drakkar.runState(),
+	}); err != nil {
 		return err
 	}
 	n := maxRows

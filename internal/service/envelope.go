@@ -29,7 +29,23 @@ type Meta struct {
 
 	DurationMS      int64 `json:"duration_ms"`
 	TimedOut        bool  `json:"timed_out"`
+	Cancelled       bool  `json:"cancelled"`
 	StdoutTruncated bool  `json:"stdout_truncated,omitempty"`
+
+	// Complete is false whenever anything parsed or written from this run may be
+	// a fragment, however clean the files look.
+	Complete bool `json:"complete"`
+}
+
+// runState is what the server stamps on every file it writes from Drakkar's
+// output, so that a file read on its own still says whether the run finished.
+func (m Meta) runState() map[string]any {
+	return map[string]any{
+		"exit_code":   m.ExitCode,
+		"timed_out":   m.TimedOut,
+		"cancelled":   m.Cancelled,
+		"duration_ms": m.DurationMS,
+	}
 }
 
 // RowSet is what a TSV mode returns: the header as read, a declared preview, and

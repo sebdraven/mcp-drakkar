@@ -22,6 +22,8 @@ type DecompileInput struct {
 
 	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
+	Background bool `json:"background,omitempty" jsonschema:"run as a job detached from this request and answer at once with a job_id; out_dir is then required, and drakkar_job_status gives the outcome"`
+
 	MaxChars       *int `json:"max_chars,omitempty" jsonschema:"how many characters of Java to return inline; the whole of it is written to decompiled.java either way"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
 }
@@ -117,6 +119,8 @@ type BundleInput struct {
 	Archive   bool   `json:"archive,omitempty" jsonschema:"also write OUT/<sha256>.bundle.zip, the whole bundle directory under <sha256>/ in one deterministic file: the file to upload to an import service. Needs Drakkar 0.3.0"`
 
 	Jobs *int `json:"jobs,omitempty" jsonschema:"worker threads for the per-class pass; omit to leave Drakkar's own choice in force"`
+
+	Background bool `json:"background,omitempty" jsonschema:"run as a job detached from this request and answer at once with a job_id; drakkar_job_status gives the outcome, and job.json and envelope.json land in out_dir"`
 
 	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many entries of errors.json to return inline; the whole file stays in the bundle"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`

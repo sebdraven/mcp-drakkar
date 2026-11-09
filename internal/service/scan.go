@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/sebdraven/mcp-drakkar/internal/drakkar"
 )
@@ -24,6 +25,8 @@ type ScanInput struct {
 
 	OutDir string `json:"out_dir,omitempty" jsonschema:"absolute directory for this call's output — reports, parsed rows, extracted files; omitted, a fresh directory under the system temp directory is used and its path comes back in report_path"`
 
+	Background bool `json:"background,omitempty" jsonschema:"run as a job detached from this request and answer at once with a job_id; out_dir is then required, and drakkar_job_status gives the outcome"`
+
 	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many detections or per-sample reports to return inline; the whole set stays on disk"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
 }
@@ -43,6 +46,7 @@ func (s *Service) Scan(ctx context.Context, in ScanInput) (*Envelope, error) {
 
 	args := drakkar.New()
 	var bulkOut, graphPath string
+	var resumed int
 	timeout := s.timeout(s.timeouts.Diff, in.TimeoutSeconds)
 	if file != "" {
 		args.Positional(file)
@@ -55,7 +59,9 @@ func (s *Service) Scan(ctx context.Context, in ScanInput) (*Envelope, error) {
 		}
 	} else {
 		timeout = s.timeout(s.timeouts.Bulk, in.TimeoutSeconds)
-		bulkOut, err = out.subdir("out")
+		// Without --overwrite Drakkar skips a sample whose report exists: a
+		// non-empty out/ is then a resumed run, not a mix.
+		bulkOut, resumed, err = s.bulkOutDir(out, !in.Overwrite)
 		if err != nil {
 			return nil, err
 		}
@@ -69,6 +75,9 @@ func (s *Service) Scan(ctx context.Context, in ScanInput) (*Envelope, error) {
 	env, res, err := s.invoke(ctx, out, timeout, args)
 	if err != nil {
 		return nil, err
+	}
+	if resumed > 0 {
+		env.note(fmt.Sprintf("%d report(s) were already under %s when the call began; Drakkar resumed past them rather than recomputing them, so they come from an earlier run. Pass overwrite to recompute every sample", resumed, bulkOut))
 	}
 	if bulkOut != "" {
 		if err := s.finishBulkOut(env, bulkOut, rows); err != nil {
