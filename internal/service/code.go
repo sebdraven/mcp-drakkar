@@ -394,7 +394,7 @@ func (s *Service) OrphanAudit(ctx context.Context, in OrphanAuditInput) (*Envelo
 		args.Switch("--orphan-audit").JSONReport(reportPath)
 	} else {
 		timeout = s.timeout(s.timeouts.Bulk, in.TimeoutSeconds)
-		bulkOut, err = out.subdir("out")
+		bulkOut, _, err = s.bulkOutDir(out, false)
 		if err != nil {
 			return nil, err
 		}

@@ -57,7 +57,7 @@ func (s *Service) inventory(ctx context.Context, tool, mode string, in Inventory
 	timeout := s.timeout(s.timeouts.Fast, in.TimeoutSeconds)
 	if dir != "" {
 		timeout = s.timeout(s.timeouts.Bulk, in.TimeoutSeconds)
-		bulkOut, err = out.subdir("out")
+		bulkOut, _, err = s.bulkOutDir(out, false)
 		if err != nil {
 			return nil, err
 		}
