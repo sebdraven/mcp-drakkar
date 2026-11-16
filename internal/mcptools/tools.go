@@ -23,12 +23,12 @@ import (
 const backgroundSentence = " With background=true it runs as a job detached from the request and answers at once with a job_id: use it for anything that may outlast a minute, then poll drakkar_job_status."
 
 // Instructions is handed to the client once, so that the envelope contract and
-// the path rules are not repeated in thirty-two descriptions.
+// the path rules are not repeated in thirty-three descriptions.
 const Instructions = `Drakkar is a static analysis engine for Android APKs and raw DEX files. Every tool here runs the drakkar binary found on PATH; this server never builds, installs or downloads it.
 
 Paths are parameters, given per call, and must be absolute — a relative one would be resolved against a working directory nobody chose. There is nothing to configure and no directory to declare in advance.
 
-Output goes where out_dir says. Two tools require it, drakkar_bundle and drakkar_dart_snapshot, and refuse a call without it. For every other tool, omitted, the server makes a fresh directory under the system temp directory and returns its path in report_path, so a report never lands somewhere unpredictable. Call drakkar_version to see which Drakkar is in use and where that fallback is.
+Output goes where out_dir says. Three tools require it, drakkar_bundle, drakkar_dart_snapshot and drakkar_native_strings, and refuse a call without it. For every other tool, omitted, the server makes a fresh directory under the system temp directory and returns its path in report_path, so a report never lands somewhere unpredictable. Call drakkar_version to see which Drakkar is in use and where that fallback is.
 
 Every tool answers with the same envelope:
   drakkar     which Drakkar, the exact argv, the exit code, the duration, whether it timed out, whether it was cancelled, and complete
@@ -43,7 +43,7 @@ Read stderr and notes before the numbers. A non-zero exit code or a non-zero fai
 
 drakkar.complete is true only when drakkar exited 0, did not time out, was not cancelled and its stdout was not cut. complete=false means partial output, whatever the files look like: a report list that is a prefix of the batch, a rows.json written from half a stdout. rows.json and lines.json carry the same complete flag.
 
-Any call that may run past a minute — a bulk directory, drakkar_diff_matrix, drakkar_diff_dex, drakkar_diff_explain, drakkar_decompile, drakkar_dart_snapshot, drakkar_bundle, drakkar_scan, drakkar_native with disasm — should pass background=true with an out_dir: a client or bridge that gives up on a request cancels it, and drakkar with it. The call then answers at once with a job_id; drakkar_job_status gives the state and, once the job has ended, the envelope. At most DRAKKAR_MAX_JOBS jobs run at once. Every call that ran drakkar leaves envelope.json in its output directory, the whole envelope: the on-disk record of what the call gave, even when the answer never reached the client.
+Any call that may run past a minute — a bulk directory, drakkar_diff_matrix, drakkar_diff_dex, drakkar_diff_explain, drakkar_decompile, drakkar_dart_snapshot, drakkar_native_strings, drakkar_bundle, drakkar_scan, drakkar_native with disasm — should pass background=true with an out_dir: a client or bridge that gives up on a request cancels it, and drakkar with it. The call then answers at once with a job_id; drakkar_job_status gives the state and, once the job has ended, the envelope. At most DRAKKAR_MAX_JOBS jobs run at once. Every call that ran drakkar leaves envelope.json in its output directory, the whole envelope: the on-disk record of what the call gave, even when the answer never reached the client.
 
 Flags with a Drakkar default are omitted unless you set them, so Drakkar decides. SHA-256 values are never truncated, here or anywhere in the output.`
 
@@ -64,6 +64,7 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"These texts are where a metric's limits are stated — that orphan means unreferenced from code and not unused, that the near-class threshold is a parameter of the tool and not a published empirical value — so read the legend before interpreting a number from the matching mode. " +
 			"Topic native defines invalid_paths, invalid_paths_count and opaque_dead_code as drakkar_native reports them. " +
 			"Topic dart_snapshot defines heuristic, the values of layout_source, the keys of rejected and the calibration outcomes as drakkar_dart_snapshot reports them; it needs Drakkar 0.5.0. " +
+			"Topic native_strings defines boundary, encoding, every summary counter, xrefs, crates and the cryptographic constants as drakkar_native_strings reports them; it needs Drakkar 0.6.0. " +
 			"Reads no sample.",
 	}, r.legend)
 
@@ -120,6 +121,19 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"out_dir is required and Drakkar 0.5.0 is needed; drakkar_legend with topic dart_snapshot defines every field, heuristic, layout_source, the rejected keys and the calibration outcomes." +
 			backgroundSentence,
 	}, r.dartSnapshot)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_native_strings",
+		Description: "Extract the strings of every ELF in an APK, an XAPK (base and ABI splits) or one raw ELF recognised by its magic, each with its address, section, encoding and how its boundary was found, plus cryptographic constants recognised by content. " +
+			"patterns keeps only the strings containing one of them (case-insensitive substring); summary counts, crates, c_libraries and crypto_constants always cover every string. With xrefs, each string and constant carries the instructions that form its address and the function holding them; with crates, the Rust crates named by source paths and the banners of statically linked C libraries. " +
+			"The answer: per ELF in the elfs tail, elf, split, elf_sha256 (whole), machine and Drakkar's summary as is, with crates, c_libraries and crypto_constants whole; a strings tail cut at max_rows, whose total is the number of strings in the report and returned the number shown; elfs_not_selected and errors as is; every [AVERT] and [FAIL] line of stderr as a note. The whole report is out_dir/<sha256 of the input>.native_strings.json, in report_path, and never comes back inline. " +
+			"boundary: nul — text ending on a NUL byte, only its end is proven; rust_fatptr — a relocated Rust &str {ptr, len} pair found in the data, start and end proven; rust_code — an address formed in AArch64 code paired with an immediate length, proven but open to false positives such as a memcpy's source and size; heuristic — text with no proven bound, typically a block of concatenated &str, or a piece cut at an address the code forms. " +
+			"An empty xrefs is not evidence that a string is unused: indirectly computed addresses, an ADRP and its ADD far apart, encrypted or runtime-generated code and reads from another library all escape the scan. " +
+			"rust_code and xrefs exist only for AArch64 (64-bit little-endian): for any other machine summary.code_scan is null, no string is rust_code and xrefs stay empty. " +
+			"Use drakkar_strings for the DEX string pool, where Java and Kotlin literals live, and drakkar_native for ELF structure, JNI binding and the disassembly of JNI functions. " +
+			"out_dir is required and Drakkar 0.6.0 is needed; an older one refuses the flag with a message that comes back as is. drakkar_legend with topic native_strings defines every field." +
+			backgroundSentence,
+	}, r.nativeStrings)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_strings",
@@ -357,6 +371,12 @@ func (r *registry) nativeArch(ctx context.Context, _ *mcp.CallToolRequest, in se
 func (r *registry) dartSnapshot(ctx context.Context, _ *mcp.CallToolRequest, in service.DartSnapshotInput) (*mcp.CallToolResult, *service.Envelope, error) {
 	return r.run(ctx, service.Call{Tool: "drakkar_dart_snapshot", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
 		return r.svc.DartSnapshot(ctx, in)
+	})
+}
+
+func (r *registry) nativeStrings(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeStringsInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	return r.run(ctx, service.Call{Tool: "drakkar_native_strings", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.NativeStrings(ctx, in)
 	})
 }
 

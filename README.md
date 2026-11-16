@@ -36,8 +36,9 @@ Paths are tool parameters, given per call, the way they are in a shell. They mus
 be **absolute** — a relative path would be resolved against the child's working
 directory, which is the call's output directory and not your shell.
 
-Output goes wherever the call's `out_dir` says. Two tools require it,
-`drakkar_bundle` and `drakkar_dart_snapshot`, and refuse a call without it. For
+Output goes wherever the call's `out_dir` says. Three tools require it,
+`drakkar_bundle`, `drakkar_dart_snapshot` and `drakkar_native_strings`, and
+refuse a call without it. For
 every other tool, omitted, the server makes a fresh directory under the system
 temp directory and returns its path in `report_path`. That fallback exists for
 one reason: Drakkar's own `--out` defaults to `./reports` *relative to the
@@ -58,13 +59,14 @@ refuses with the same message.
 | Tool | What it answers |
 |---|---|
 | `drakkar_version` | which Drakkar is in use, which one this server was written against, the timeouts, and where output lands by default |
-| `drakkar_legend` | Drakkar's own legend for a mode: where a metric's limits are stated; topic `native` covers `drakkar_native`, including its disasm labels, and topic `dart_snapshot` covers `drakkar_dart_snapshot` |
+| `drakkar_legend` | Drakkar's own legend for a mode: where a metric's limits are stated; topic `native` covers `drakkar_native`, including its disasm labels, topic `dart_snapshot` covers `drakkar_dart_snapshot`, and topic `native_strings` covers `drakkar_native_strings` |
 | `drakkar_manifest` | permissions, components, intent filters, derived entry points |
 | `drakkar_cert` | signature schemes v1/v2/v3/v3.1 and the X.509 certificates |
 | `drakkar_dating` | raw dating indicators — no date is ever estimated |
 | `drakkar_native` | every ELF found by content, its JNI exports and tables, and the binding of DEX native methods to them; with `disasm`, the static disassembly of every JNI-bound function, `JNI_OnLoad` and the `init_array` constructors — JNIEnv calls decoded, PLT imports called, strings referenced — bounded by `disasm_depth` (0–3) and `disasm_max_insns` (1–20000), instructions left in `report.json`; each `disasm_functions` row counts its `invalid_paths` and each `elfs` row carries `invalid_paths_count` (null without `disasm` or before Drakkar 0.2.3), both defined by `drakkar_legend` topic `native` |
 | `drakkar_native_arch` | ABI, word size and machine of each `.so` under `lib/` |
 | `drakkar_dart_snapshot` | the Dart AOT snapshot blobs of a Flutter app's `libapp.so`: where each blob is, its header (`version_hash` whole, `kind`, `features`, `compressed_pointers`), the serialized / data image split, and per section the counts of a heuristic string enumeration whose entries stay in `report.json`; calibration is optional and needs witnesses, `out_dir` is required — see [below](#reading-a-flutter-snapshot) |
+| `drakkar_native_strings` | the strings of every ELF in an APK, an XAPK (base and ABI splits) or a raw ELF, each with how its boundary was found (`nul`, `rust_fatptr`, `rust_code`, `heuristic`), plus cryptographic constants; with `xrefs`, the AArch64 instructions forming each address; with `crates`, Rust crates and statically linked C libraries. Per ELF the summary comes back as is, the strings as a preview cut at `max_rows` with its total; the whole report is `<out_dir>/<sha256>.native_strings.json`. `out_dir` is required; needs Drakkar 0.6.0 |
 | `drakkar_strings` | the DEX string pool, whole or filtered |
 | `drakkar_disasm` | selected classes disassembled with operands resolved |
 | `drakkar_decompile` | selected classes decompiled to Java by dex-decompiler, to check against `drakkar_disasm` |
@@ -102,8 +104,9 @@ about none of them.
 ### Reading a sample through its bundle
 
 `drakkar_decompile` and `drakkar_bundle` need Drakkar 0.2.0; against an older
-one they refuse with a message saying so. `drakkar_bundle` is one of the two tools
-whose `out_dir` is required — the other is `drakkar_dart_snapshot`: the bundle is
+one they refuse with a message saying so. `drakkar_bundle` is one of the three tools
+whose `out_dir` is required — the others are `drakkar_dart_snapshot` and
+`drakkar_native_strings`: the bundle is
 a deliverable, written to `OUT/<sha256 of the input>/`, never to a temporary
 directory. The two readers run no analysis — they read that directory, and call
 nothing but `drakkar --version`, to refuse alongside the others when the Drakkar

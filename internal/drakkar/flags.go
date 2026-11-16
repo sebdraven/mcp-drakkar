@@ -72,6 +72,12 @@ func init() {
 	known["--dart-snapshot"] = switchFlag
 	known["--dart-max-rows"] = valueFlag
 	known["--dart-calibrate"] = multiFlag
+	// --native-strings and its options: Drakkar 0.6.0
+	known["--native-strings"] = optionalMultiFlag
+	known["--min-length"] = valueFlag
+	known["--elf"] = valueFlag
+	known["--xrefs"] = switchFlag
+	known["--crates"] = switchFlag
 	known["--extract-libs"] = switchFlag
 	known["--list-entries"] = switchFlag
 	known["--extract-entry"] = multiFlag
