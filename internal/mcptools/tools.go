@@ -23,7 +23,7 @@ import (
 const backgroundSentence = " With background=true it runs as a job detached from the request and answers at once with a job_id: use it for anything that may outlast a minute, then poll drakkar_job_status."
 
 // Instructions is handed to the client once, so that the envelope contract and
-// the path rules are not repeated in thirty-three descriptions.
+// the path rules are not repeated in thirty-four descriptions.
 const Instructions = `Drakkar is a static analysis engine for Android APKs and raw DEX files. Every tool here runs the drakkar binary found on PATH; this server never builds, installs or downloads it.
 
 Paths are parameters, given per call, and must be absolute — a relative one would be resolved against a working directory nobody chose. There is nothing to configure and no directory to declare in advance.
@@ -43,7 +43,7 @@ Read stderr and notes before the numbers. A non-zero exit code or a non-zero fai
 
 drakkar.complete is true only when drakkar exited 0, did not time out, was not cancelled and its stdout was not cut. complete=false means partial output, whatever the files look like: a report list that is a prefix of the batch, a rows.json written from half a stdout. rows.json and lines.json carry the same complete flag.
 
-Any call that may run past a minute — a bulk directory, drakkar_diff_matrix, drakkar_diff_dex, drakkar_diff_explain, drakkar_decompile, drakkar_dart_snapshot, drakkar_native_strings, drakkar_bundle, drakkar_scan, drakkar_native with disasm — should pass background=true with an out_dir: a client or bridge that gives up on a request cancels it, and drakkar with it. The call then answers at once with a job_id; drakkar_job_status gives the state and, once the job has ended, the envelope. At most DRAKKAR_MAX_JOBS jobs run at once. Every call that ran drakkar leaves envelope.json in its output directory, the whole envelope: the on-disk record of what the call gave, even when the answer never reached the client.
+Any call that may run past a minute — a bulk directory, drakkar_diff_matrix, drakkar_diff_dex, drakkar_diff_explain, drakkar_decompile, drakkar_dart_snapshot, drakkar_native_strings, drakkar_bundle, drakkar_scan, drakkar_native with disasm, drakkar_native_symex — should pass background=true with an out_dir: a client or bridge that gives up on a request cancels it, and drakkar with it. The call then answers at once with a job_id; drakkar_job_status gives the state and, once the job has ended, the envelope. At most DRAKKAR_MAX_JOBS jobs run at once. Every call that ran drakkar leaves envelope.json in its output directory, the whole envelope: the on-disk record of what the call gave, even when the answer never reached the client.
 
 Flags with a Drakkar default are omitted unless you set them, so Drakkar decides. SHA-256 values are never truncated, here or anywhere in the output.`
 
@@ -62,7 +62,7 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Name: "drakkar_legend",
 		Description: "Print Drakkar's own legend for a mode: the labels it emits and the rules it derives them by. " +
 			"These texts are where a metric's limits are stated — that orphan means unreferenced from code and not unused, that the near-class threshold is a parameter of the tool and not a published empirical value — so read the legend before interpreting a number from the matching mode. " +
-			"Topic native defines invalid_paths, invalid_paths_count and opaque_dead_code as drakkar_native reports them. " +
+			"Topic native defines invalid_paths, invalid_paths_count and opaque_dead_code as drakkar_native reports them, and, with a Drakkar that has --native-symex, every field, status and expression form of drakkar_native_symex in its SYMEX section. " +
 			"Topic dart_snapshot defines heuristic, the values of layout_source, the keys of rejected and the calibration outcomes as drakkar_dart_snapshot reports them; it needs Drakkar 0.5.0. " +
 			"Topic native_strings defines boundary, encoding, every summary counter, xrefs, crates and the cryptographic constants as drakkar_native_strings reports them; it needs Drakkar 0.6.0. " +
 			"Reads no sample.",
@@ -106,6 +106,16 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"It extracts nothing: drakkar_extract_libs remains the tool for getting the files themselves. One APK or one raw ELF at a time." +
 			backgroundSentence,
 	}, r.native)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_native_symex",
+		Description: "Static symbolic propagation, with no execution and no solver, through one AArch64 function of an ELF in an APK or of one raw ELF: path by path, where the value read or written at each watched instruction comes from, the calls met on the way and, on request, the bytes of the symbolic memory a register points to. " +
+			"function is <elf|*>@<hex address>; watch lists the instructions to observe, and Drakkar refuses a run without one; peek (<watch>:<register>+<offset>:<length>) reads memory just before a watch; entry, depth, max_insns, max_paths, fragment_max, callee_forks, refine, follow and undirected tune the exploration, each omitted unless set so that Drakkar's default applies. " +
+			"The head is one summary per symex entry (elf, fn_start, fn_end, bound, entry, directed, budgets, paths_explored, paths_cut, budget_hit, callees_abandoned, callees_incomplete, forks_dropped, rounds, and the counts of watches, calls and indirect_branches); the watches tail has every watch with its results sorted by paths descending and cut at max_rows per watch, expression texts and trees whole; calls, sorted by paths descending, and indirect_branches are tails cut at max_rows; errors comes back as is. " +
+			"Results are what the propagation saw on the paths it explored, not every value possible at run time: budget_hit, paths_cut, callees_abandoned and callees_incomplete say where coverage is partial, the flags are never evaluated so both sides of every branch are explored, and two different bases are assumed not to overlap. " +
+			"A refusal from Drakkar, an unknown option or an invalid argument, comes back verbatim in errors and in the notes. drakkar_legend with topic native defines every field in its SYMEX section." +
+			backgroundSentence,
+	}, r.nativeSymex)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_native_arch",
@@ -359,6 +369,12 @@ func (r *registry) dating(ctx context.Context, _ *mcp.CallToolRequest, in servic
 func (r *registry) native(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeInput) (*mcp.CallToolResult, *service.Envelope, error) {
 	return r.run(ctx, service.Call{Tool: "drakkar_native", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
 		return r.svc.Native(ctx, in)
+	})
+}
+
+func (r *registry) nativeSymex(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeSymexInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	return r.run(ctx, service.Call{Tool: "drakkar_native_symex", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.NativeSymex(ctx, in)
 	})
 }
 
