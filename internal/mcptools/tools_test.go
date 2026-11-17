@@ -40,6 +40,7 @@ var wantTools = []string{
 	"drakkar_native_arch",
 	"drakkar_native_strings",
 	"drakkar_native_symex",
+	"drakkar_native_xrefs",
 	"drakkar_orphan_audit",
 	"drakkar_probe_api",
 	"drakkar_reflection_inputs",
@@ -167,7 +168,7 @@ func TestLongToolsTakeBackground(t *testing.T) {
 		"drakkar_diff_matrix", "drakkar_bundle", "drakkar_native",
 		"drakkar_diff_dex", "drakkar_diff_explain", "drakkar_decompile",
 		"drakkar_disasm", "drakkar_probe_api", "drakkar_dart_snapshot",
-		"drakkar_native_strings", "drakkar_native_symex",
+		"drakkar_native_strings", "drakkar_native_symex", "drakkar_native_xrefs",
 	} {
 		tool, ok := got[name]
 		if !ok {
