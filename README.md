@@ -59,11 +59,12 @@ refuses with the same message.
 | Tool | What it answers |
 |---|---|
 | `drakkar_version` | which Drakkar is in use, which one this server was written against, the timeouts, and where output lands by default |
-| `drakkar_legend` | Drakkar's own legend for a mode: where a metric's limits are stated; topic `native` covers `drakkar_native`, including its disasm labels, topic `dart_snapshot` covers `drakkar_dart_snapshot`, and topic `native_strings` covers `drakkar_native_strings` |
+| `drakkar_legend` | Drakkar's own legend for a mode: where a metric's limits are stated; topic `native` covers `drakkar_native`, including its disasm labels, and `drakkar_native_symex` in its SYMEX section, topic `dart_snapshot` covers `drakkar_dart_snapshot`, and topic `native_strings` covers `drakkar_native_strings` |
 | `drakkar_manifest` | permissions, components, intent filters, derived entry points |
 | `drakkar_cert` | signature schemes v1/v2/v3/v3.1 and the X.509 certificates |
 | `drakkar_dating` | raw dating indicators — no date is ever estimated |
 | `drakkar_native` | every ELF found by content, its JNI exports and tables, and the binding of DEX native methods to them; with `disasm`, the static disassembly of every JNI-bound function, `JNI_OnLoad` and the `init_array` constructors — JNIEnv calls decoded, PLT imports called, strings referenced — bounded by `disasm_depth` (0–3) and `disasm_max_insns` (1–20000), instructions left in `report.json`; each `disasm_functions` row counts its `invalid_paths` and each `elfs` row carries `invalid_paths_count` (null without `disasm` or before Drakkar 0.2.3), both defined by `drakkar_legend` topic `native` |
+| `drakkar_native_symex` | static symbolic propagation, with no execution, through one AArch64 function of an ELF: the symbolic value at each watched instruction, the calls met on the way and, on request, the bytes of memory a register points to — see [below](#following-a-value-through-a-native-function) |
 | `drakkar_native_arch` | ABI, word size and machine of each `.so` under `lib/` |
 | `drakkar_dart_snapshot` | the Dart AOT snapshot blobs of a Flutter app's `libapp.so`: where each blob is, its header (`version_hash` whole, `kind`, `features`, `compressed_pointers`), the serialized / data image split, and per section the counts of a heuristic string enumeration whose entries stay in `report.json`; calibration is optional and needs witnesses, `out_dir` is required — see [below](#reading-a-flutter-snapshot) |
 | `drakkar_native_strings` | the strings of every ELF in an APK, an XAPK (base and ABI splits) or a raw ELF, each with how its boundary was found (`nul`, `rust_fatptr`, `rust_code`, `heuristic`), plus cryptographic constants; with `xrefs`, the AArch64 instructions forming each address; with `crates`, Rust crates and statically linked C libraries. Per ELF the summary comes back as is, the strings as a preview cut at `max_rows` with its total; the whole report is `<out_dir>/<sha256>.native_strings.json`. `out_dir` is required; needs Drakkar 0.6.0 |
@@ -202,6 +203,57 @@ every field: what `heuristic` means, the values of `layout_source`, the keys of
 `rejected`, and the calibration outcomes (`calibrated`, `insufficient_witnesses`,
 `witness_not_found`, `witnesses_not_all_found`, `witnesses_outside_data_image`,
 `no_layout_explains_witnesses`, `ambiguous_layout`, `not_run`).
+
+### Following a value through a native function
+
+`drakkar_native_symex` runs `drakkar <apk> --native --native-symex=<function>`
+with the options below: a propagation of symbolic values through one AArch64
+function, path by path, with no execution and no solver. It answers where the
+value read or written at each watched instruction comes from. The mode is on
+Drakkar's `feat/native-symex` branch; a Drakkar without it refuses the option,
+and its message comes back verbatim in `errors` and in the notes.
+
+```text
+drakkar_native_symex {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/symex",
+                      "function": "lib/arm64-v8a/libfoo.so@1a00",
+                      "watch": ["1a40", "1a58"],
+                      "peek": ["1a40:x1+0x10:16", "1a58:sp+8:8"],
+                      "background": true}
+→ argv: /corpus/sample.apk --native --native-symex=lib/arm64-v8a/libfoo.so@1a00
+        --native-symex-watch=1a40,1a58 --native-symex-peek=1a40:x1+0x10:16,1a58:sp+8:8
+        --format=json --json-out=/cases/2026-11/symex/report.json
+  result.symex[]: elf, fn_start, fn_end, bound, entry, directed, budgets, paths_explored,
+                  paths_cut, budget_hit, callees_abandoned, callees_incomplete,
+                  forks_dropped, rounds, watches_count, calls_count, indirect_branches_count
+  tails.watches: insn_addr, instruction, reached, results[] (by paths, cut at max_rows)
+  tails.calls, tails.indirect_branches, tails.errors
+  report_path = /cases/2026-11/symex/report.json
+```
+
+| Parameter | |
+|---|---|
+| `apk` | required, absolute: one APK, or one raw ELF |
+| `function` | required: `<elf path\|*>@<hex address>`, passed as is to `--native-symex`; `*` takes every AArch64 ELF whose executable code holds the address |
+| `watch` | hex addresses of the instructions to observe, joined into `--native-symex-watch`; Drakkar refuses a run without one |
+| `peek` | `<watch>:<register>+<offset>:<length>` items, joined into `--native-symex-peek`: bytes of the symbolic memory just before that watch |
+| `entry` | `--native-symex-entry`: hex address inside the function to start from |
+| `depth`, `max_insns`, `max_paths`, `fragment_max`, `callee_forks`, `refine` | `--native-symex-depth`, `-max-insns`, `-max-paths`, `-fragment-max`, `-callee-forks`, `-refine` |
+| `follow` | hex addresses of `bl` (or `b`) whose callee is followed whatever the depth, joined into `--native-symex-follow` |
+| `undirected` | `--native-symex-undirected`: neither pruning nor ordering by distance to the watches |
+| `out_dir`, `background`, `max_rows`, `timeout_seconds` | as for `drakkar_native`; the timeout is the class of `drakkar_native` with `disasm` |
+
+A parameter left out adds no option, so Drakkar's default applies. The server
+checks the form only — hex addresses (`0x` optional, as Drakkar reads them),
+integers not negative, no empty item — and leaves every other refusal to Drakkar.
+
+Each watch comes back with all its fields and its `results` sorted by `paths`
+descending, cut at `max_rows` per watch, with `results_total` and
+`results_truncated`; each result keeps its expressions (text and tree), `trace`,
+`trace_truncated` and `peeks` whole. Each row of `watches`, `calls` and
+`indirect_branches` also carries the `elf` and `fn_start` of its symex entry,
+since `*` may yield one entry per ELF. A field absent from the report stays
+absent. `drakkar_legend` with topic `native` defines every field, status and
+expression form in its SYMEX section.
 
 ## The answer
 
