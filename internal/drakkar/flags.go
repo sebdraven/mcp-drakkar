@@ -68,6 +68,20 @@ func init() {
 	// --native-dex and --native-listing: Drakkar main, not yet in a tag
 	known["--native-dex"] = multiFlag
 	known["--native-listing"] = multiFlag
+	// --native-symex and its options: Drakkar branch feat/native-symex, not yet merged.
+	// Drakkar splits the list options on commas; they go as one joined value.
+	known["--native-symex"] = valueFlag
+	known["--native-symex-watch"] = valueFlag
+	known["--native-symex-peek"] = valueFlag
+	known["--native-symex-entry"] = valueFlag
+	known["--native-symex-depth"] = valueFlag
+	known["--native-symex-max-insns"] = valueFlag
+	known["--native-symex-max-paths"] = valueFlag
+	known["--native-symex-fragment-max"] = valueFlag
+	known["--native-symex-callee-forks"] = valueFlag
+	known["--native-symex-refine"] = valueFlag
+	known["--native-symex-follow"] = valueFlag
+	known["--native-symex-undirected"] = switchFlag
 	// --dart-snapshot and its options: Drakkar 0.5.0
 	known["--dart-snapshot"] = switchFlag
 	known["--dart-max-rows"] = valueFlag
