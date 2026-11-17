@@ -27,7 +27,7 @@ type NativeStringsInput struct {
 	Xrefs     bool     `json:"xrefs,omitempty" jsonschema:"for each string and constant, the AArch64 instructions that form its address and the function holding them, over all the code; AArch64 only"`
 	Crates    bool     `json:"crates,omitempty" jsonschema:"Rust crates named by the source paths found in the strings, and banners of statically linked C libraries"`
 
-	MaxRows *int `json:"max_rows,omitempty" jsonschema:"how many strings to return inline, across all ELFs in report order; tails.strings.total counts them all, and every string stays in report_path"`
+	MaxRows *int `json:"max_rows,omitempty" jsonschema:"how many strings to return inline, and separately how many format arrays, each across all ELFs in report order; tails.strings.total and tails.format_arrays.total count them all, and every string and array stays in report_path"`
 
 	Background bool `json:"background,omitempty" jsonschema:"run as a job detached from this request and answer at once with a job_id; out_dir is then required, and drakkar_job_status gives the outcome"`
 
@@ -118,27 +118,31 @@ func noteNativeStringsStderr(env *Envelope) {
 	}
 }
 
-// nativeStringsReport is the report read in one pass: the strings past the
-// preview are counted and skipped, never held.
+// nativeStringsReport is the report read in one pass: the strings and format
+// arrays past the preview are counted and skipped, never held.
 type nativeStringsReport struct {
 	head         map[string]any
 	elfs         []any
 	strings      []any
 	stringsTotal int
+	arrays       []any
+	arraysTotal  int
+	// arraysAbsent counts the ELFs without format_arrays: Drakkar before 0.6.1.
+	arraysAbsent int
 	notSelected  []any
 	errors       []any
 }
 
-// nativeStringsELFKeys are the per-ELF fields returned; strings is a tail of
-// its own.
+// nativeStringsELFKeys are the per-ELF fields returned; strings and
+// format_arrays are tails of their own.
 var nativeStringsELFKeys = map[string]bool{
 	"elf": true, "split": true, "elf_sha256": true, "machine": true, "summary": true,
 	"crates": true, "c_libraries": true, "crypto_constants": true,
 }
 
 // finishNativeStrings puts sha256, input, options and limits in the head, and
-// four tails beside it: elfs, elfs_not_selected and errors whole, strings cut
-// at maxRows.
+// five tails beside it: elfs, elfs_not_selected and errors whole, strings and
+// format_arrays each cut at maxRows.
 func (s *Service) finishNativeStrings(env *Envelope, path string, maxRows int) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -158,16 +162,11 @@ func (s *Service) finishNativeStrings(env *Envelope, path string, maxRows int) e
 		return fmt.Errorf("parsing %s: %w", path, err)
 	}
 
-	preview := Tail{
-		Total:     r.stringsTotal,
-		Returned:  len(r.strings),
-		Truncated: len(r.strings) < r.stringsTotal,
-		Items:     r.strings,
-	}
 	env.Result = r.head
 	env.Tails = map[string]Tail{
 		"elfs":              makeTail(r.elfs, len(r.elfs)),
-		"strings":           preview,
+		"strings":           cutTail(r.strings, r.stringsTotal),
+		"format_arrays":     cutTail(r.arrays, r.arraysTotal),
 		"elfs_not_selected": makeTail(r.notSelected, len(r.notSelected)),
 		"errors":            makeTail(r.errors, len(r.errors)),
 	}
@@ -175,6 +174,12 @@ func (s *Service) finishNativeStrings(env *Envelope, path string, maxRows int) e
 
 	if len(r.strings) < r.stringsTotal {
 		env.note(fmt.Sprintf("strings: %d of %d shown, in report order (ELF after ELF, by vaddr); every string is in report_path", len(r.strings), r.stringsTotal))
+	}
+	if len(r.arrays) < r.arraysTotal {
+		env.note(fmt.Sprintf("format_arrays: %d of %d shown, in report order (ELF after ELF, by array_vaddr); every array is in report_path", len(r.arrays), r.arraysTotal))
+	}
+	if r.arraysAbsent > 0 {
+		env.note(fmt.Sprintf("format_arrays requires Drakkar 0.6.1: %d of %d ELF(s) in the report have no format_arrays, and the tail counts nothing for them", r.arraysAbsent, len(r.elfs)))
 	}
 	switch {
 	case len(r.elfs) == 0 && len(r.notSelected) > 0:
@@ -190,7 +195,7 @@ func (s *Service) finishNativeStrings(env *Envelope, path string, maxRows int) e
 
 func readNativeStrings(rd io.Reader, maxRows int) (*nativeStringsReport, error) {
 	dec := json.NewDecoder(rd)
-	r := &nativeStringsReport{head: map[string]any{}, elfs: []any{}, strings: []any{}}
+	r := &nativeStringsReport{head: map[string]any{}, elfs: []any{}, strings: []any{}, arrays: []any{}}
 	err := eachKey(dec, func(key string) error {
 		switch key {
 		case "elfs":
@@ -222,22 +227,14 @@ func readNativeStrings(rd io.Reader, maxRows int) (*nativeStringsReport, error) 
 
 func (r *nativeStringsReport) readELF(dec *json.Decoder, maxRows int) error {
 	row := map[string]any{}
+	hasArrays := false
 	err := eachKey(dec, func(key string) error {
 		switch {
 		case key == "strings":
-			return eachItem(dec, func() error {
-				r.stringsTotal++
-				if len(r.strings) < maxRows {
-					var v any
-					if err := dec.Decode(&v); err != nil {
-						return err
-					}
-					r.strings = append(r.strings, v)
-					return nil
-				}
-				var skip json.RawMessage
-				return dec.Decode(&skip)
-			})
+			return readCapped(dec, &r.strings, &r.stringsTotal, maxRows)
+		case key == "format_arrays":
+			hasArrays = true
+			return readCapped(dec, &r.arrays, &r.arraysTotal, maxRows)
 		case nativeStringsELFKeys[key]:
 			var v any
 			if err := dec.Decode(&v); err != nil {
@@ -253,8 +250,33 @@ func (r *nativeStringsReport) readELF(dec *json.Decoder, maxRows int) error {
 	if err != nil {
 		return err
 	}
+	if !hasArrays {
+		r.arraysAbsent++
+	}
 	r.elfs = append(r.elfs, row)
 	return nil
+}
+
+// readCapped counts every item of one array and keeps them while items holds
+// fewer than maxRows; the rest are skipped.
+func readCapped(dec *json.Decoder, items *[]any, total *int, maxRows int) error {
+	return eachItem(dec, func() error {
+		*total++
+		if len(*items) < maxRows {
+			var v any
+			if err := dec.Decode(&v); err != nil {
+				return err
+			}
+			*items = append(*items, v)
+			return nil
+		}
+		var skip json.RawMessage
+		return dec.Decode(&skip)
+	})
+}
+
+func cutTail(items []any, total int) Tail {
+	return Tail{Total: total, Returned: len(items), Truncated: len(items) < total, Items: items}
 }
 
 // eachKey walks one JSON object; fn must consume the value of each key.
