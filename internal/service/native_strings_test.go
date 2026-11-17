@@ -22,6 +22,17 @@ func nsString(elf, sha, vaddr, value, boundary string) string {
 	 "section": ".rodata", "length": ` + strconv.Itoa(len(value)) + `, "encoding": "ascii", "value": "` + value + `", "boundary": "` + boundary + `"}`
 }
 
+// format_arrays of Drakkar 0.6.1: two in the base's ELF, one in the split's.
+const (
+	nsArraysLib = `,
+   "format_arrays": [
+    {"array_vaddr": "0x4000", "section": ".data.rel.ro", "len": 2, "propagated": true, "pieces": ["SECRET_ONE", "!"]},
+    {"array_vaddr": "0x4020", "section": ".data.rel.ro", "len": 1, "propagated": true, "pieces": ["SECRET_TWO"]}]`
+	nsArraysSplit = `,
+   "format_arrays": [
+    {"array_vaddr": "0x1800", "section": ".data.rel.ro", "len": 3, "propagated": true, "pieces": ["a", "b", "c"]}]`
+)
+
 // The shape of a --native-strings report: one ELF of the base with three
 // strings and --crates, one ELF of an ABI split with two.
 var nsReportBody = `{"sha256": "` + nsInputSHA + `", "input": "/corpus/a.xapk!base.apk",
@@ -43,7 +54,7 @@ var nsReportBody = `{"sha256": "` + nsInputSHA + `", "input": "/corpus/a.xapk!ba
    ],
    "crates": [{"crate": "ring", "version": "0.17.8", "registry": "index.crates.io-6f17d22bba15001f", "occurrences": 2}],
    "c_libraries": [{"library": "OpenSSL", "banner": "OpenSSL 3.0.13", "vaddr": "0x2100"}],
-   "crypto_constants": [{"name": "aes_sbox", "byte_order": null, "length": 256, "vaddr": "0x3000", "file_offset": "0x3000", "section": ".rodata"}]},
+   "crypto_constants": [{"name": "aes_sbox", "byte_order": null, "length": 256, "vaddr": "0x3000", "file_offset": "0x3000", "section": ".rodata"}]` + nsArraysLib + `},
   {"elf": "lib/arm64-v8a/libbar.so", "split": "config.arm64_v8a", "elf_sha256": "` + nsSplitSHA + `", "machine": "aarch64",
    "summary": {"areas": "sections", "strings_found": 2, "strings_emitted": 2,
                "by_boundary": {"nul": 2, "rust_fatptr": 0, "rust_code": 0, "heuristic": 0},
@@ -56,7 +67,7 @@ var nsReportBody = `{"sha256": "` + nsInputSHA + `", "input": "/corpus/a.xapk!ba
 ` + nsString("config.arm64_v8a!lib/arm64-v8a/libbar.so", nsSplitSHA, "0x1000", "SECRET_THREE", "nul") + `,
 ` + nsString("config.arm64_v8a!lib/arm64-v8a/libbar.so", nsSplitSHA, "0x1010", "SECRET_FOUR", "nul") + `
    ],
-   "crates": [], "c_libraries": [], "crypto_constants": []}
+   "crates": [], "c_libraries": [], "crypto_constants": []` + nsArraysSplit + `}
  ],
  "elfs_not_selected": [], "errors": []}
 `
@@ -175,6 +186,61 @@ func TestNativeStringsPreviewIsCutAtMaxRowsAndCounted(t *testing.T) {
 	}
 }
 
+func TestNativeStringsFormatArraysAreCutAtMaxRowsApartFromStrings(t *testing.T) {
+	env := finishNativeStringsFixture(t, nsReportBody, 2)
+	arrays := env.Tails["format_arrays"]
+	if arrays.Total != 3 || arrays.Returned != 2 || !arrays.Truncated {
+		t.Fatalf("format_arrays tail = total %d, returned %d, truncated %v; want 3, 2, true", arrays.Total, arrays.Returned, arrays.Truncated)
+	}
+	if a := arrays.Items[1].(map[string]any); a["array_vaddr"] != "0x4020" {
+		t.Errorf("format_arrays[1] = %v", a)
+	}
+	if s := env.Tails["strings"]; s.Total != 5 || s.Returned != 2 || !s.Truncated {
+		t.Errorf("strings tail = %+v; max_rows applies to it on its own", s)
+	}
+	notes := strings.Join(env.Notes, "\n")
+	if !strings.Contains(notes, "format_arrays: 2 of 3 shown") {
+		t.Errorf("no note declares the cut: %q", env.Notes)
+	}
+	if strings.Contains(notes, "0.6.1") {
+		t.Errorf("a report with format_arrays was taken for an older Drakkar's: %q", env.Notes)
+	}
+
+	// Four strings shown do not eat into the arrays: all three come back.
+	apart := finishNativeStringsFixture(t, nsReportBody, 4)
+	if a := apart.Tails["format_arrays"]; a.Total != 3 || a.Returned != 3 || a.Truncated {
+		t.Errorf("format_arrays tail = %+v, want all three", a)
+	}
+	if s := apart.Tails["strings"]; s.Returned != 4 || !s.Truncated {
+		t.Errorf("strings tail = %+v", s)
+	}
+	for _, n := range apart.Notes {
+		if strings.HasPrefix(n, "format_arrays:") {
+			t.Errorf("a whole preview was declared cut: %s", n)
+		}
+	}
+}
+
+func TestNativeStringsWithoutFormatArraysIsDrakkar060(t *testing.T) {
+	body := strings.Replace(nsReportBody, nsArraysLib, "", 1)
+	body = strings.Replace(body, nsArraysSplit, "", 1)
+	s, _ := testService(t)
+	env := &Envelope{}
+	if err := s.finishNativeStrings(env, writeReport(t, body), 50); err != nil {
+		t.Fatalf("a Drakkar 0.6.0 report was refused: %v", err)
+	}
+	arrays := env.Tails["format_arrays"]
+	if arrays.Total != 0 || arrays.Returned != 0 || arrays.Truncated || arrays.Items == nil || len(arrays.Items) != 0 {
+		t.Errorf("format_arrays tail = %+v, want empty", arrays)
+	}
+	if !strings.Contains(strings.Join(env.Notes, "\n"), "format_arrays requires Drakkar 0.6.1") {
+		t.Errorf("no note names Drakkar 0.6.1: %q", env.Notes)
+	}
+	if st := env.Tails["strings"]; st.Total != 5 {
+		t.Errorf("strings tail = %+v", st)
+	}
+}
+
 func TestNativeStringsHeadAndELFRows(t *testing.T) {
 	env := finishNativeStringsFixture(t, nsReportBody, 1)
 	head := env.Result.(map[string]any)
@@ -198,6 +264,9 @@ func TestNativeStringsHeadAndELFRows(t *testing.T) {
 	}
 	if _, present := lib["strings"]; present {
 		t.Error("strings reached an elfs row; they are a tail of their own")
+	}
+	if _, present := lib["format_arrays"]; present {
+		t.Error("format_arrays reached an elfs row; they are a tail of their own")
 	}
 	summary := lib["summary"].(map[string]any)
 	if summary["strings_found"] != float64(3) || summary["by_boundary"].(map[string]any)["rust_fatptr"] != float64(1) {
