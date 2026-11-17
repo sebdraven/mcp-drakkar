@@ -82,6 +82,10 @@ func init() {
 	known["--native-symex-refine"] = valueFlag
 	known["--native-symex-follow"] = valueFlag
 	known["--native-symex-undirected"] = switchFlag
+	// --native-xrefs and its cap: Drakkar branch kepler/feat/native-symex (340dc91), not yet merged.
+	// Drakkar repeats --native-xrefs; the server passes one spec.
+	known["--native-xrefs"] = valueFlag
+	known["--native-xrefs-max"] = valueFlag
 	// --dart-snapshot and its options: Drakkar 0.5.0
 	known["--dart-snapshot"] = switchFlag
 	known["--dart-max-rows"] = valueFlag

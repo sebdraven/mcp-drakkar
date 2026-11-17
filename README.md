@@ -59,12 +59,13 @@ refuses with the same message.
 | Tool | What it answers |
 |---|---|
 | `drakkar_version` | which Drakkar is in use, which one this server was written against, the timeouts, and where output lands by default |
-| `drakkar_legend` | Drakkar's own legend for a mode: where a metric's limits are stated; topic `native` covers `drakkar_native`, including its disasm labels, and `drakkar_native_symex` in its SYMEX section, topic `dart_snapshot` covers `drakkar_dart_snapshot`, and topic `native_strings` covers `drakkar_native_strings` |
+| `drakkar_legend` | Drakkar's own legend for a mode: where a metric's limits are stated; topic `native` covers `drakkar_native`, including its disasm labels, `drakkar_native_symex` in its SYMEX section and `drakkar_native_xrefs` in its XREFS section, topic `dart_snapshot` covers `drakkar_dart_snapshot`, and topic `native_strings` covers `drakkar_native_strings` |
 | `drakkar_manifest` | permissions, components, intent filters, derived entry points |
 | `drakkar_cert` | signature schemes v1/v2/v3/v3.1 and the X.509 certificates |
 | `drakkar_dating` | raw dating indicators — no date is ever estimated |
 | `drakkar_native` | every ELF found by content, its JNI exports and tables, and the binding of DEX native methods to them; with `disasm`, the static disassembly of every JNI-bound function, `JNI_OnLoad` and the `init_array` constructors — JNIEnv calls decoded, PLT imports called, strings referenced — bounded by `disasm_depth` (0–3) and `disasm_max_insns` (1–20000), instructions left in `report.json`; each `disasm_functions` row counts its `invalid_paths` and each `elfs` row carries `invalid_paths_count` (null without `disasm` or before Drakkar 0.2.3), both defined by `drakkar_legend` topic `native` |
 | `drakkar_native_symex` | static symbolic propagation, with no execution, through one AArch64 function of an ELF: the symbolic value at each watched instruction, the calls met on the way and, on request, the bytes of memory a register points to — see [below](#following-a-value-through-a-native-function) |
+| `drakkar_native_xrefs` | static cross-references, with no execution, to addresses of an AArch64 ELF: the function holding each one, the branches to it, the instructions forming its address and the data words holding it — see [below](#finding-what-refers-to-a-native-address) |
 | `drakkar_native_arch` | ABI, word size and machine of each `.so` under `lib/` |
 | `drakkar_dart_snapshot` | the Dart AOT snapshot blobs of a Flutter app's `libapp.so`: where each blob is, its header (`version_hash` whole, `kind`, `features`, `compressed_pointers`), the serialized / data image split, and per section the counts of a heuristic string enumeration whose entries stay in `report.json`; calibration is optional and needs witnesses, `out_dir` is required — see [below](#reading-a-flutter-snapshot) |
 | `drakkar_native_strings` | the strings of every ELF in an APK, an XAPK (base and ABI splits) or a raw ELF, each with how its boundary was found (`nul`, `rust_fatptr`, `rust_code`, `heuristic`), plus cryptographic constants and `format_arrays`, the arrays of contiguous Rust `{ptr, len}` pairs (format string pieces or `&str` tables); with `xrefs`, the AArch64 instructions forming each address; with `crates`, Rust crates and statically linked C libraries. Per ELF the summary comes back as is, the strings and the format arrays as two previews, each cut at `max_rows` with its total; the whole report is `<out_dir>/<sha256>.native_strings.json`. `out_dir` is required; needs Drakkar 0.6.0, and 0.6.1 for `format_arrays` |
@@ -254,6 +255,57 @@ descending, cut at `max_rows` per watch, with `results_total` and
 since `*` may yield one entry per ELF. A field absent from the report stays
 absent. `drakkar_legend` with topic `native` defines every field, status and
 expression form in its SYMEX section.
+
+### Finding what refers to a native address
+
+`drakkar_native_xrefs` runs `drakkar <apk> --native --native-xrefs=<elf|*>@<addresses>`:
+for each address of an AArch64 ELF, with no execution, the function that holds
+it, the direct branches to it (a function's callers), the instructions that form
+or access its address, and the data words that hold it (method tables). The mode
+is on Drakkar's `kepler/feat/native-symex` branch; a Drakkar without it refuses
+the option, and its message comes back verbatim in `errors` and in the notes.
+
+```text
+drakkar_native_xrefs {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/xrefs",
+                      "elf": "lib/arm64-v8a/libfoo.so",
+                      "addresses": ["1a00", "0x5010"]}
+→ argv: /corpus/sample.apk --native --native-xrefs=lib/arm64-v8a/libfoo.so@1a00,0x5010
+        --format=json --json-out=/cases/2026-11/xrefs/report.json
+  result.xrefs[]: elf, target, section, function,
+                  code_refs {total, truncated}, addr_refs {total, truncated},
+                  data_refs {total, truncated}
+  tails.code_refs: insn_addr, mnemonic, kind, function, elf, target
+  tails.addr_refs: insn_addr, adrp_addr, kind, function, elf, target
+  tails.data_refs: vaddr, section, relocated, elf, target
+  tails.errors
+  report_path = /cases/2026-11/xrefs/report.json
+```
+
+| Parameter | |
+|---|---|
+| `apk` | required, absolute: one APK, or one raw ELF |
+| `elf` | path of the ELF in the APK (`elfs[].path` of `drakkar_native`, the file name for a raw ELF), or `*`; omitted, `*`: every AArch64 ELF with an allocated section holding the address |
+| `addresses` | required: 1 to 64 hex addresses, `0x` optional, joined after `<elf>@` into `--native-xrefs` |
+| `max` | `--native-xrefs-max`: references Drakkar keeps per list and per address; totals stay exact |
+| `out_dir`, `background`, `max_rows`, `timeout_seconds` | as for `drakkar_native_symex`, timeout class included |
+
+A parameter left out adds no option, so Drakkar's default applies. The server
+checks the form only — hex addresses, a list neither empty nor over 64 distinct
+addresses, `max` not negative — and leaves every other refusal to Drakkar.
+
+The head has one entry per ELF and address, with `function` as Drakkar gives it
+(absent when the address is not in executable code) and the `total` and
+`truncated` of each list. Each tail holds the items of every entry in the
+report's order, each with the `elf` and `target` of its entry, cut at
+`max_rows`; its total counts the items present in the report. When Drakkar cut a
+list itself (`truncated`), a note gives the exact total and points to `max`. A
+field absent from the report stays absent. `drakkar_legend` with topic `native`
+defines every field and kind in its XREFS section.
+
+No reference is not a proof of absence: an indirect branch (`br`, `blr`), a
+computed address, an ADRP and its ADD or LDR far apart, a jump table, or code
+that is encrypted or generated at run time escape the search. A target with no
+reference in any of the three lists gets a note saying so.
 
 ## The answer
 
