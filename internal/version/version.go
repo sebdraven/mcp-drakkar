@@ -14,7 +14,7 @@ const Version = "0.17.1"
 // A constant here rather than a -ldflags injection for the same reason as
 // Version: injecting it would mean the release workflow had to know a value that
 // lives in the code.
-const DrakkarTested = "0.6.0 (33d1c0e3f55df245268f084f905d5b1534c6514f)"
+const DrakkarTested = "0.7.0 (8f1e1c7077c637aa2a4488ef542e5502308e96b3)"
 
 // Commit is injected at link time by the release workflow.
 var Commit = "unknown"
