@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -59,7 +60,7 @@ func finishNativeFixture(t *testing.T, body string, maxRows int) *Envelope {
 	t.Helper()
 	s, _ := testService(t)
 	env := &Envelope{}
-	if err := s.finishNative(env, writeReport(t, body), maxRows, false); err != nil {
+	if err := s.finishNative(env, writeReport(t, body), maxRows, false, false); err != nil {
 		t.Fatal(err)
 	}
 	return env
@@ -314,7 +315,7 @@ func finishNativeDisasmFixture(t *testing.T, body string, maxRows int) *Envelope
 	t.Helper()
 	s, _ := testService(t)
 	env := &Envelope{}
-	if err := s.finishNative(env, writeReport(t, body), maxRows, true); err != nil {
+	if err := s.finishNative(env, writeReport(t, body), maxRows, true, false); err != nil {
 		t.Fatal(err)
 	}
 	return env
@@ -705,5 +706,112 @@ func TestNativeDexSourcesAndListings(t *testing.T) {
 	}
 	if _, present := old.Tails["listings"]; present {
 		t.Error("a report without listings grew a listings tail")
+	}
+}
+
+func TestNativeArgvIgnoresListingOnly(t *testing.T) {
+	in := NativeInput{Disasm: true, Listing: []string{"*@0x1000-0x1040"}}
+	without, err := nativeArgs("/a.apk", "/out/report.json", in).Argv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.ListingOnly = true
+	with, err := nativeArgs("/a.apk", "/out/report.json", in).Argv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(with, "\x00") != strings.Join(without, "\x00") {
+		t.Errorf("argv = %q with listing_only, %q without", with, without)
+	}
+}
+
+func TestNativeListingOnlyNeedsListingAndDisasm(t *testing.T) {
+	s, base := testService(t)
+	apk := filepath.Join(base, "a.apk")
+	for _, c := range []struct {
+		in   NativeInput
+		want string
+	}{
+		{NativeInput{ListingOnly: true, Disasm: true}, "needs a listing"},
+		{NativeInput{ListingOnly: true}, "disasm=true"},
+	} {
+		if err := checkNativeDisasm(c.in); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%+v: err = %v, want %q", c.in, err, c.want)
+		}
+		c.in.APK = apk
+		if _, err := s.Native(context.Background(), c.in); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("Native should refuse %+v before running Drakkar, err = %v", c.in, err)
+		}
+	}
+	if err := checkNativeDisasm(NativeInput{ListingOnly: true, Disasm: true, Listing: []string{"*@0x1000"}}); err != nil {
+		t.Errorf("listing_only with disasm and a listing was refused: %v", err)
+	}
+}
+
+// The disasm report above with one listing of three instructions.
+var nativeListingOnlyReportBody = strings.Replace(nativeDisasmReportBody, `"errors": []`, `"listings": [
+    {"elf": "lib/arm64-v8a/libfoo.so", "start": "0x1000", "end": "0x100c", "instructions": [
+      {"address": "0x1000", "bytes": "fd7bbfa9", "mnemonic": "stp", "operands": "x29, x30, [sp, #-0x10]!", "comment": null},
+      {"address": "0x1004", "bytes": "ff030094", "mnemonic": "bl", "operands": "$+0xffc", "comment": "dlopen"},
+      {"address": "0x1008", "bytes": "c0035fd6", "mnemonic": "ret", "operands": "", "comment": null}
+    ]}
+  ],
+  "errors": []`, 1)
+
+func finishNativeListingOnly(t *testing.T, maxRows int, listingOnly bool) *Envelope {
+	t.Helper()
+	s, _ := testService(t)
+	env := &Envelope{}
+	if err := s.finishNative(env, writeReport(t, nativeListingOnlyReportBody), maxRows, true, listingOnly); err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+func TestNativeListingOnlyWithholdsTheOtherTails(t *testing.T) {
+	full := finishNativeListingOnly(t, 2, false)
+	only := finishNativeListingOnly(t, 2, true)
+	for k, total := range map[string]int{"disasm_functions": 3, "binding": 3, "upcalls": 3, "registered_by_code": 1} {
+		tail := only.Tails[k]
+		if tail.Total != total || tail.Total != full.Tails[k].Total || tail.Returned != 0 || !tail.Truncated || tail.Items == nil || len(tail.Items) != 0 {
+			t.Errorf("%s tail = %+v, want no item, total %d, truncated", k, tail, total)
+		}
+	}
+	if !reflect.DeepEqual(only.Result, full.Result) {
+		t.Errorf("head = %v, want %v", only.Result, full.Result)
+	}
+	for _, k := range []string{"elfs", "errors", "listings"} {
+		if !reflect.DeepEqual(only.Tails[k], full.Tails[k]) {
+			t.Errorf("%s tail = %+v, want %+v", k, only.Tails[k], full.Tails[k])
+		}
+	}
+	if len(only.Tails) != len(full.Tails) {
+		t.Errorf("tails = %v, want the same keys as %v", only.Tails, full.Tails)
+	}
+	if notes := strings.Join(only.Notes, "\n"); !strings.Contains(notes, "withheld on request") || !strings.Contains(notes, "report_path") {
+		t.Errorf("notes = %q", only.Notes)
+	}
+	if strings.Contains(strings.Join(full.Notes, "\n"), "withheld") {
+		t.Errorf("notes without listing_only = %q", full.Notes)
+	}
+
+	empty := withheldTail(makeTail([]any{}, 0))
+	if empty.Total != 0 || empty.Truncated || empty.Items == nil {
+		t.Errorf("an empty tail withheld = %+v, want total 0, not truncated", empty)
+	}
+}
+
+func TestNativeListingOnlyKeepsWholeListings(t *testing.T) {
+	env := finishNativeListingOnly(t, 800, true)
+	tail := env.Tails["listings"]
+	if tail.Total != 1 || tail.Returned != 1 || tail.Truncated {
+		t.Fatalf("listings tail = %+v", tail)
+	}
+	l := tail.Items[0].(map[string]any)
+	if len(l["instructions"].([]any)) != 3 || l["instructions_total"] != 3 || l["truncated"] != false {
+		t.Errorf("listing = %v, want every instruction and not truncated", l)
+	}
+	if f := env.Tails["disasm_functions"]; f.Returned != 0 || f.Total != 3 {
+		t.Errorf("max_rows reached disasm_functions: %+v", f)
 	}
 }
