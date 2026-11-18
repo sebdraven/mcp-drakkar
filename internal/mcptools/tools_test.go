@@ -38,7 +38,11 @@ var wantTools = []string{
 	"drakkar_manifest",
 	"drakkar_native",
 	"drakkar_native_arch",
+	"drakkar_native_async_graph",
+	"drakkar_native_fields",
+	"drakkar_native_find",
 	"drakkar_native_labels",
+	"drakkar_native_slice",
 	"drakkar_native_strings",
 	"drakkar_native_symex",
 	"drakkar_native_vtables",
@@ -173,11 +177,16 @@ func TestLongToolsTakeBackground(t *testing.T) {
 		"drakkar_disasm", "drakkar_probe_api", "drakkar_dart_snapshot",
 		"drakkar_native_strings", "drakkar_native_symex", "drakkar_native_xrefs",
 		"drakkar_native_words", "drakkar_native_vtables", "drakkar_native_labels",
+		"drakkar_native_find", "drakkar_native_slice", "drakkar_native_async_graph",
+		"drakkar_native_fields",
 	} {
 		tool, ok := got[name]
 		if !ok {
 			t.Errorf("tool %q is missing", name)
 			continue
+		}
+		if strings.HasPrefix(name, "drakkar_native_") && !strings.Contains(Instructions, name) {
+			t.Errorf("the instructions do not list %q among the long tools", name)
 		}
 		schema, err := json.Marshal(tool.InputSchema)
 		if err != nil {

@@ -105,6 +105,36 @@ func init() {
 	known["--native-labels-max"] = valueFlag
 	known["--native-labels-strings-max"] = valueFlag
 	known["--native-labels-fragment-fanout"] = valueFlag
+	// --native-find and its options: merged into Drakkar main (PR #54).
+	// --native-slice, --native-async-graph, --native-fields and their options:
+	// Drakkar branch feat/native-find, not yet merged. Drakkar splits the list
+	// options on commas; they go as one joined value, always with '='.
+	known["--native-find"] = valueFlag
+	known["--native-find-off"] = valueFlag
+	known["--native-find-access"] = valueFlag
+	known["--native-find-size"] = valueFlag
+	known["--native-find-base"] = valueFlag
+	known["--native-find-in"] = valueFlag
+	known["--native-find-max"] = valueFlag
+	known["--native-slice"] = valueFlag
+	known["--native-slice-at"] = valueFlag
+	known["--native-slice-depth"] = valueFlag
+	known["--native-slice-follow"] = valueFlag
+	known["--native-slice-max-steps"] = valueFlag
+	known["--native-slice-max-sources"] = valueFlag
+	known["--native-async-graph"] = valueFlag
+	known["--native-async-from"] = valueFlag
+	known["--native-async-to"] = valueFlag
+	known["--native-async-path"] = valueFlag
+	known["--native-async-depth"] = valueFlag
+	known["--native-async-max"] = valueFlag
+	known["--native-async-kinds"] = valueFlag
+	known["--native-fields"] = valueFlag
+	known["--native-fields-fn"] = valueFlag
+	known["--native-fields-name"] = valueFlag
+	known["--native-fields-min"] = valueFlag
+	known["--native-fields-fragment-fanout"] = valueFlag
+	known["--native-fields-max"] = valueFlag
 	// --dart-snapshot and its options: Drakkar 0.5.0
 	known["--dart-snapshot"] = switchFlag
 	known["--dart-max-rows"] = valueFlag

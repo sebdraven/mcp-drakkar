@@ -179,6 +179,10 @@ table is the map.
 | `drakkar_native_words` | 8-byte words at addresses, relocations applied, and what each designates — [details](#reading-native-data-words) |
 | `drakkar_native_vtables` | the Rust method tables, found by their shape — candidates, not proofs — [details](#listing-rust-method-tables) |
 | `drakkar_native_labels` | per function, its strings and a readable label: its function name (`fn_name`), else its log tag (`log_tag`), else its source path (`source_path`) — a reading aid, not a proven name — [details](#labelling-native-functions-by-their-strings) |
+| `drakkar_native_find` | the instructions that read, write or form the address of a structure field at given offsets, with per-function counts — candidates, as an offset names a field only in one structure — [details](#finding-who-touches-a-structure-field) |
+| `drakkar_native_slice` | where a value comes from, walking one function backwards on every path at once: arguments, initial memory, constants, addresses, calls — sources may be too many, never too few within the budget — [details](#tracing-a-value-back-to-its-sources) |
+| `drakkar_native_async_graph` | a graph of direct calls and Rust method-table creation, to go from one function to another across indirect calls — possible paths, not executed ones — [details](#crossing-indirect-calls-through-method-tables) |
+| `drakkar_native_fields` | per function, the field names a serde or prost deserializer references, its type-shaped names and its callers — an identifier is not necessarily a field — [details](#listing-the-fields-a-deserializer-reads) |
 | `drakkar_dart_snapshot` | the Dart AOT snapshot blobs of a Flutter app's `libapp.so` — [details](#reading-a-flutter-snapshot) |
 
 **Rules**
@@ -393,28 +397,36 @@ is null). They come back unfiltered in `result.bundle`.
 
 ## Native code
 
-Nine tools read the native side of a sample, nothing executed. `drakkar_native`
+Thirteen tools read the native side of a sample, nothing executed. `drakkar_native`
 is the entry point: it finds every ELF by content, binds the DEX native methods
 to it, and gives the `elfs[].path` the other tools take as `elf`. From there:
 
 - strings first, with `drakkar_native_strings`, or per function with
-  `drakkar_native_labels`, to name the functions of a stripped binary;
+  `drakkar_native_labels`, to name the functions of a stripped binary, and
+  `drakkar_native_fields`, to list the structures read from JSON or protobuf;
 - what refers to an address, with `drakkar_native_xrefs`, and what a block of
   data holds, with `drakkar_native_words` and `drakkar_native_vtables`;
+- who touches a structure field, with `drakkar_native_find`, and how one gets
+  from a function to another across indirect calls, with
+  `drakkar_native_async_graph`;
 - the instructions of a function, with `drakkar_native` `listing`, and where a
-  value comes from, with `drakkar_native_symex`.
+  value comes from, forwards path by path with `drakkar_native_symex` or
+  backwards on all paths at once with `drakkar_native_slice`.
 
-The five modes that work on addresses of an AArch64 ELF — `drakkar_native_symex`,
-`drakkar_native_xrefs`, `drakkar_native_words`, `drakkar_native_vtables` and
-`drakkar_native_labels` — share their conventions. Each takes one APK or one raw
+The nine modes that work on addresses of an AArch64 ELF — `drakkar_native_symex`,
+`drakkar_native_xrefs`, `drakkar_native_words`, `drakkar_native_vtables`,
+`drakkar_native_labels`, `drakkar_native_find`, `drakkar_native_slice`,
+`drakkar_native_async_graph` and `drakkar_native_fields` — share their
+conventions. Each takes one APK or one raw
 ELF recognised by its magic. The server checks the form of a parameter only — hex
 addresses, list sizes, integers not negative — refuses before Drakkar runs when
 it is wrong, and leaves every other refusal to Drakkar. A parameter left out adds
 no option, so Drakkar's default applies. When Drakkar refuses a call and writes no
 report, its message comes back verbatim in `errors` and in the notes; for
-`drakkar_native_words`, `drakkar_native_vtables` and `drakkar_native_labels`, a
-note also says whether that Drakkar lacks the mode itself or only one of its
-options. A field absent from a report stays absent, and `drakkar_legend` with
+`drakkar_native_words`, `drakkar_native_vtables`, `drakkar_native_labels`,
+`drakkar_native_find`, `drakkar_native_slice`, `drakkar_native_async_graph` and
+`drakkar_native_fields`, a note also says whether that Drakkar lacks the mode
+itself or only one of its options. A field absent from a report stays absent, and `drakkar_legend` with
 topic `native` defines every field, in one section per mode.
 
 ### Binding and disassembling native code
@@ -829,6 +841,226 @@ fragment (`via_fragment`) belongs to one of the fragment's callers, not
 necessarily to all of them; an indirect, conditional or inner call to the
 fragment is not seen. A function whose strings escape the scan — a computed
 address, an ADRP and its ADD far apart — does not appear.
+
+### Finding who touches a structure field
+
+`drakkar_native_find` runs `drakkar <apk> --native --native-find=<elf|*>
+--native-find-off=<o1,o2,…>` with the filters below: over the whole code of an
+AArch64 ELF, with no execution, the instructions that read (`load`) or write
+(`store`) a structure field at a given offset from a base register — `ldr` and
+`str` families, pairs included — or form its address (`addr`: `add` or `sub`
+of an immediate), with per-function counts by offset. It serves to find the
+functions that copy a field from one structure to another. The mode is merged
+into Drakkar's main (PR #54); the three below are still on Drakkar's
+`feat/native-find` branch, not yet merged. A Drakkar without a mode refuses its
+option, and its message comes back verbatim in `errors` and in the notes.
+
+```text
+drakkar_native_find {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/find",
+                     "elf": "lib/arm64-v8a/libapp.so", "offsets": ["0x16a", "-0x8"],
+                     "access": ["load", "store"], "size": [1]}
+→ argv: /corpus/sample.apk --native --native-find=lib/arm64-v8a/libapp.so
+        --native-find-off=0x16a,-0x8 --native-find-access=load,store
+        --native-find-size=1 --format=json --json-out=/cases/2026-11/find/report.json
+  result.find[]:   elf, matches_total, functions_total, truncated, and every other
+                   ELF-level field of the report
+  tails.functions: every function whole (fn_start, fn_end, bound, counts[] …), elf
+  tails.matches:   every match whole (insn_addr, mnemonic, operands, access, size,
+                   base, offset, function …), elf
+  tails.errors
+  report_path = /cases/2026-11/find/report.json
+```
+
+| Parameter | |
+|---|---|
+| `apk` | required, absolute: one APK, or one raw ELF |
+| `elf` | path of the ELF in the APK, or `*`; omitted, `*`: every AArch64 ELF |
+| `offsets` | `--native-find-off`, required: 1 to 16 hex offsets, `0x` optional, a leading `-` allowed; always passed attached with `=`, so a negative offset is never read as an option |
+| `access` | `--native-find-access`: a subset of `load`, `store`, `addr` |
+| `size` | `--native-find-size`: widths in bytes among 1, 2, 4, 8, 16; no effect on `addr` |
+| `base` | `--native-find-base`: `any`, `sp` or `nosp`; Drakkar leaves `sp` out by default |
+| `in` | `--native-find-in`: 1 to 64 hex addresses; keep the functions containing one of them |
+| `max` | `--native-find-max`: matches Drakkar renders per ELF; `matches_total`, `functions_total` and `functions[]` stay exact |
+| `out_dir`, `background`, `max_rows`, `timeout_seconds` | as for `drakkar_native_labels`, timeout class included; `max_rows` cuts the `functions` and the `matches` tails each |
+
+The head carries every ELF-level field but the `functions` and `matches`
+arrays; `functions[]`, which Drakkar never caps, goes whole to its own tail and
+never in the head, and `matches[]` to another, each element with its `elf`, both
+cut at `max_rows`. When Drakkar cut the matches (`truncated`), a note gives
+`matches_total` and `functions_total` and recalls the offsets, the filters and
+`max`; an ELF with no match gets a note recalling that the stack pointer is left
+out as a base by default. `drakkar_legend` with topic `native` defines every
+field in its FIND section.
+
+An offset names a field only within one given structure: the same offset serves
+other structures, so the result is a list of candidates. An access through a
+pointer computed first (`add`, then a load at offset 0) shows as `addr`, not as
+`load` or `store`; an access inside an outlined fragment is reported in the
+fragment, not in its callers; an offset held in a register, or a copy through
+`memcpy`, escapes the mode; the limits of the code walk apply.
+
+### Tracing a value back to its sources
+
+`drakkar_native_slice` runs `drakkar <apk> --native --native-slice=<elf|*>@<fn>
+--native-slice-at=<q1,q2,…>`: from a register or a memory zone read just before
+an instruction of one AArch64 function, with no execution, Drakkar walks the
+data flow graph backwards on every path at once — the set of locations still
+sought at each point, a union at each join, a fixed point at each loop — and
+lists where the value comes from. Where `drakkar_native_symex` follows values
+forwards, path by path, this mode answers "where does this come from" without
+enumerating paths.
+
+```text
+drakkar_native_slice {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/slice",
+                      "function": "lib/arm64-v8a/libapp.so@0x2f000",
+                      "at": ["0x2f3c0:x0+0x5a9:1", "0x2f3d4:x8"], "depth": 2}
+→ argv: /corpus/sample.apk --native --native-slice=lib/arm64-v8a/libapp.so@0x2f000
+        --native-slice-at=0x2f3c0:x0+0x5a9:1,0x2f3d4:x8 --native-slice-depth=2
+        --format=json --json-out=/cases/2026-11/slice/report.json
+  result.slices[]: elf, fn_start, fn_end, bound, and queries[] reduced to at,
+                   location, complete, steps, sources_total, sources_truncated
+  tails.sources:   every source whole (kind, location or value, insn_addr,
+                   call_target, bytes, chain[] …), elf, fn_start, query_at,
+                   query_location
+  tails.errors
+  report_path = /cases/2026-11/slice/report.json
+```
+
+| Parameter | |
+|---|---|
+| `apk` | required, absolute: one APK, or one raw ELF |
+| `function` | `--native-slice`, required: `<elf path\|*>@<hex address>`, passed as is |
+| `at` | `--native-slice-at`, required: 1 to 16 queries `<hex address>:<location>`, none holding a comma; a location is a register (`x8`, `sp`) or `<register>+<offset>:<length>` (`x0+0x5a9:1`), read with the register's value just before the instruction |
+| `depth` | `--native-slice-depth`: levels of called functions followed; outlined fragments are always walked through |
+| `follow` | `--native-slice-follow`: hex addresses of `bl` (or `b`) followed whatever the depth |
+| `max_steps` | `--native-slice-max-steps`: fixed-point iterations per query |
+| `max_sources` | `--native-slice-max-sources`: sources Drakkar renders per query; `sources_total` stays exact |
+| `out_dir`, `background`, `max_rows`, `timeout_seconds` | as for `drakkar_native_labels`, timeout class included; `max_rows` cuts the `sources` tail |
+
+The server checks the form of `function` and of each query — a hex address, a
+colon, a non-empty location — and leaves the grammar of a location to Drakkar.
+The head holds one entry per function, every entry-level field as is, its
+queries without their sources; the `sources` tail every source whole, chain
+included, with the `elf` and `fn_start` of its function and the `at` and
+`location` of its query as `query_at` and `query_location`, since a source has a
+`location` of its own. A note names each query whose `complete` is false — the
+`max_steps` budget or the `max_sources` cap was reached, the result is partial —
+and each query without any source. `drakkar_legend` with topic `native` defines
+every field in its SLICE section.
+
+Every path of the flow graph is covered, impossible ones included: sources may
+be too many, never too few within the model and the budget, and `complete` says
+whether the budget cut. Different memory bases are assumed disjoint, so a write
+through a pointer computed otherwise is not seen. A write made by a called
+function that is not followed comes out as a `call` source, not as a value. An
+unresolved indirect jump cuts the walk on that path, with an `unknown` source.
+
+### Crossing indirect calls through method tables
+
+`drakkar_native_async_graph` runs `drakkar <apk> --native
+--native-async-graph=<elf|*>` with at least one query: a graph of the functions
+of an AArch64 ELF whose edges carry their proof — `call` when F holds a `bl` or
+`b` to the start of G (`insn_addr`), `makes` when F forms the address of a Rust
+method table of which G is a method or the destructor (`insn_addr`,
+`adrp_addr`, `table`, `offset`). In Rust an async task or a closure passed as a
+trait object is such a table, and the code creating the object forms its
+address: the graph goes on where the call graph stops at an indirect call. An
+edge leaving an outlined fragment is raised to each of its callers, with
+`via_fragment`; data words holding a table's address come apart in `stores`.
+
+```text
+drakkar_native_async_graph {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/graph",
+                            "elf": "lib/arm64-v8a/libapp.so",
+                            "path": ["0x2f3c0:0x41a00"], "kinds": ["call", "makes"]}
+→ argv: /corpus/sample.apk --native --native-async-graph=lib/arm64-v8a/libapp.so
+        --native-async-path=0x2f3c0:0x41a00 --native-async-kinds=call,makes
+        --format=json --json-out=/cases/2026-11/graph/report.json
+  result.async_graph[]: elf, tables_total, and queries[] reduced to kind,
+                        requested, resolved, nodes_total, edges_total, truncated,
+                        paths_total (path)
+  tails.nodes, tails.edges, tails.paths, tails.stores: every item whole, elf,
+                        query (the index of its query); a path comes as
+                        {elf, query, edges: [...]}
+  tails.errors
+  report_path = /cases/2026-11/graph/report.json
+```
+
+| Parameter | |
+|---|---|
+| `apk` | required, absolute: one APK, or one raw ELF |
+| `elf` | path of the ELF in the APK, or `*`; omitted, `*`: every AArch64 ELF |
+| `from` | `--native-async-from`: 1 to 64 hex addresses; the descendants of the functions containing them |
+| `to` | `--native-async-to`: 1 to 64 hex addresses; their ancestors |
+| `path` | `--native-async-path`: pairs `<hex a>:<hex b>`; the shortest paths from the function containing a to the one containing b, at most 16 per pair |
+| `depth` | `--native-async-depth`: maximum depth for `from` and `to`, maximum path length for `path` |
+| `max` | `--native-async-max`: nodes Drakkar renders per query; the totals stay exact |
+| `kinds` | `--native-async-kinds`: a subset of `call`, `makes` |
+| `out_dir`, `background`, `max_rows`, `timeout_seconds` | as for `drakkar_native_labels`, timeout class included; `max_rows` cuts each of the four tails |
+
+The server refuses a call with none of `from`, `to` and `path` before Drakkar
+runs, checks the form of the addresses and of the kinds, and leaves every other
+refusal — an address outside every function, a depth above Drakkar's maximum —
+to Drakkar. A note gives the exact totals when Drakkar cut a query, and another
+names a path query without path, recalling that an absent path is not proof.
+`drakkar_legend` with topic `native` defines every field in its ASYNC_GRAPH
+section.
+
+`makes` says that F creates an object of which G is a method, not that G is
+called, nor when. A table passed through a structure field or an argument
+escapes the graph: only its creation is seen. The limits of table detection and
+of reference search apply. A path is a possible path, not an executed one.
+
+### Listing the fields a deserializer reads
+
+`drakkar_native_fields` runs `drakkar <apk> --native --native-fields=<elf|*>`
+with the filters below: per function of an AArch64 ELF, with no execution, the
+field names a deserializer generated by serde or prost references, often
+several times in the same function. The functions referencing many of them are
+the structures the binary reads from JSON or protobuf. A candidate name is a
+string of 2 to 64 characters with proven bounds (`rust_fatptr` or
+`rust_code`) shaped like an identifier; a name referenced in an outlined
+fragment goes to each of its callers (`via_fragment`), and is neither counted
+nor rendered when the fragment has more than `fragment_fanout` callers. The
+mode does not compute where a field is stored: `sites` gives the instructions to
+start `drakkar_native_slice` or `drakkar_native_symex` from.
+
+```text
+drakkar_native_fields {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/fields",
+                       "elf": "lib/arm64-v8a/libapp.so", "name": ["access_token"]}
+→ argv: /corpus/sample.apk --native --native-fields=lib/arm64-v8a/libapp.so
+        --native-fields-name=access_token
+        --format=json --json-out=/cases/2026-11/fields/report.json
+  result.fields[]: elf, functions_total, functions_matched, truncated, and every
+                   other ELF-level field of the report
+  tails.functions: every function whole (fn_start, fn_end, bound, struct_names[],
+                   fields_count, fields[] with sites[], callers[] …), elf
+  tails.errors
+  report_path = /cases/2026-11/fields/report.json
+```
+
+| Parameter | |
+|---|---|
+| `apk` | required, absolute: one APK, or one raw ELF |
+| `elf` | path of the ELF in the APK, or `*`; omitted, `*`: every AArch64 ELF |
+| `fn` | `--native-fields-fn`: 1 to 64 hex addresses; only the functions containing one of them, the candidacy condition then not applying |
+| `name` | `--native-fields-name`: exact names, case sensitive, none empty and none holding a comma; only the functions referencing one of them |
+| `min` | `--native-fields-min`: distinct candidate names a function needs to be a candidate deserializer |
+| `fragment_fanout` | `--native-fields-fragment-fanout`: callers above which a name reached through a fragment is neither counted nor rendered |
+| `max` | `--native-fields-max`: functions Drakkar renders per ELF; `functions_total` and `functions_matched` stay exact |
+| `out_dir`, `background`, `max_rows`, `timeout_seconds` | as for `drakkar_native_labels`, timeout class included |
+
+The head carries every ELF-level field but the `functions` array; the
+`functions` tail every function whole, fields, sites, struct names and callers
+included, plus its `elf`, cut at `max_rows`. When Drakkar cut the list
+(`truncated`), a note gives `functions_matched` and `functions_total` and
+recalls the filters and `max`; an ELF where no function matched gets a note too.
+`drakkar_legend` with topic `native` defines every field in its FIELDS section.
+
+A referenced identifier is not necessarily a field: a column name, a
+configuration key or an enum variant has the same shape. A function that reads
+its names through a data table rather than through addresses formed in code
+escapes the mode. The mode says neither where a field is stored nor its type.
+The limits of string references and of fragment attachment apply.
 
 ### Reading a Flutter snapshot
 
