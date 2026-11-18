@@ -92,14 +92,15 @@ Optional environment variables:
 
 | Variable | Default | |
 |---|---|---|
-| `DRAKKAR_TIMEOUT_FAST` | `2m` | inventories, string dumps, `drakkar_native` without `disasm` |
-| `DRAKKAR_TIMEOUT_DIFF` | `10m` | the diffs, `drakkar_native` with `disasm` and the other native modes |
+| `DRAKKAR_TIMEOUT_FAST` | `2m` | the quick modes: inventories, archive listings, `drakkar_native_arch`, `drakkar_native` without `disasm` |
+| `DRAKKAR_TIMEOUT_DIFF` | `10m` | the heavier ones: the pairwise diffs, `drakkar_decompile`, `drakkar_scan`, `drakkar_dart_snapshot`, `drakkar_native` with `disasm` and every other native mode |
 | `DRAKKAR_TIMEOUT_MATRIX` | `1h` | `drakkar_diff_matrix` |
-| `DRAKKAR_TIMEOUT_BULK` | `1h` | a whole `directory` |
+| `DRAKKAR_TIMEOUT_BULK` | `1h` | a whole `directory`, and `drakkar_bundle` |
 | `DRAKKAR_MAX_JOBS` | `2` | background jobs running at once |
 
 Timeouts are Go durations (`90s`, `45m`); a call can override its own with
-`timeout_seconds`. An unreadable or non-positive value falls back to the default.
+`timeout_seconds`, and `drakkar_version` shows the ones in force. An unreadable
+or non-positive value falls back to the default.
 
 ## Tools
 
@@ -275,12 +276,81 @@ that limit is refused with the way out.
 
 ### Reading a sample through its bundle
 
+Every tool that runs Drakkar returns the same envelope:
+
+| Field | What it holds |
+|---|---|
+| `drakkar` | which Drakkar, the exact argv, the exit code, the duration, whether it timed out or was cancelled, and `complete` |
+| `stderr` | the whole of stderr verbatim, counts of the `[OK]`/`[FAIL]`/`[PANIC]`/`[AVERT]` markers, and the named failures |
+| `result` | the scalar head of the report: the measurement itself |
+| `tails` | one entry per unbounded array, each with `total`, `returned`, `truncated` and a preview |
+| `rows` | for TSV-only modes: the header as read, a declared preview, and the count of malformed lines |
+| `report_path` | the complete report on disk |
+| `notes` | anything that changes how the numbers should be read |
+
+The split is the volume strategy, and it follows the shape of Drakkar's own
+reports: a head of scalars — the Jaccard, the counters, the threshold actually
+used — and tails of arrays that grow with the corpus. The head is the number you
+read; the 299 classes of a `--diff-dex` are what you open afterwards, and only
+sometimes. So the head comes back inline and verbatim, each array becomes a
+declared preview of `max_rows` items (50 by default, 2000 at most), and the whole
+report stays where Drakkar wrote it. Nothing is ever cut without `truncated`
+saying so.
+
+`groups` and `failed` stay inline for `drakkar_diff_matrix` against that rule:
+they *are* the answer rather than the appendix, and a sample that could not be
+read must not be quietly absent.
+
+**Read `stderr` and `notes` before the numbers.** stderr is never discarded,
+including on a zero exit code: a `2>/dev/null` on a sweep once hid failures and
+made a counting gap read as a regression. The `[FAIL]`/`[PANIC]` counts are how
+many entries are missing from the numbers above them, and they are reported as
+such.
+
+`drakkar.complete` is true only when Drakkar exited 0, did not time out, was not
+cancelled and its stdout was not cut. `complete: false` means partial output,
+whatever the files look like.
+
+Every call that ran Drakkar also leaves `envelope.json` in its output directory:
+the whole envelope, the on-disk record of what the call gave, even when the
+answer never reached the client.
+
+## Background jobs
+
+A client or a bridge that gives up on a request cancels it, and Drakkar with it.
+Any call that may run past a minute — a bulk `directory`, the diffs and the
+matrix, `drakkar_decompile`, `drakkar_bundle`, `drakkar_scan`,
+`drakkar_dart_snapshot`, `drakkar_native` with `disasm`, and every other native
+mode but `drakkar_native_arch` — should therefore pass `"background": true` with
+an `out_dir`:
+
+```text
+drakkar_native_xrefs {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/xrefs",
+                      "addresses": ["1a00"], "background": true}
+→ answers at once: a job_id, and a note that nothing has been measured yet
+
+drakkar_job_status {"job_id": "<job_id>"}
+→ state (running, done, failed, cancelled), elapsed time and, once ended, the envelope
+```
+
+The job writes `job.json` and, once it has ended, `envelope.json` in its
+`out_dir`, so `drakkar_job_status` with `out_dir` instead of `job_id` still works
+after a restart of the server. `done` means Drakkar ran to an end, not that the
+run was whole: read `envelope.drakkar.complete`. A `job.json` still at `running`
+that no server holds any more is reported as `orphaned`: its output is partial
+and nothing will finish it.
+
+`drakkar_job_cancel` kills Drakkar and still writes `envelope.json`, with
+`cancelled: true` and `complete: false`; only the server process that started a
+job can cancel it. At most `DRAKKAR_MAX_JOBS` jobs run at once, and a call past
+that limit is refused with the way out.
+
+## Reading a sample through its bundle
+
 `drakkar_decompile` and `drakkar_bundle` need Drakkar 0.2.0; against an older
-one they refuse with a message saying so. `drakkar_bundle` is one of the three tools
-whose `out_dir` is required — the others are `drakkar_dart_snapshot` and
-`drakkar_native_strings`: the bundle is
-a deliverable, written to `OUT/<sha256 of the input>/`, never to a temporary
-directory. The two readers run no analysis — they read that directory, and call
+one they refuse with a message saying so. `drakkar_bundle` requires `out_dir`:
+the bundle is a deliverable, written to `OUT/<sha256 of the input>/`, never to a
+temporary directory. The two readers run no analysis — they read that directory, and call
 nothing but `drakkar --version`, to refuse alongside the others when the Drakkar
 on `PATH` predates 0.2.0.
 
