@@ -25,6 +25,7 @@ type NativeInput struct {
 	DisasmDepth    *int     `json:"disasm_depth,omitempty" jsonschema:"with disasm only: how deep to follow local calls from each disassembled function, 0 to 3; omitted, Drakkar's default"`
 	DisasmMaxInsns *int     `json:"disasm_max_insns,omitempty" jsonschema:"with disasm only: instruction budget per function, 1 to 20000, past which the function is marked truncated; omitted, Drakkar's default"`
 	Listing        []string `json:"listing,omitempty" jsonschema:"with disasm only: <elf path|*>@<hex address> or <elf path|*>@<hex start>-<hex end> (end excluded); prints the instructions of that function or range with per-instruction comments; the elf path is elfs[].path, the file name for a raw ELF"`
+	ListingOnly    bool     `json:"listing_only,omitempty" jsonschema:"with listing only: return the listings alone; the disasm_functions, binding, upcalls and registered_by_code tails come back empty with their exact totals, and max_rows then caps the instructions of each listing only; the whole report stays in report_path"`
 
 	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many binding rows, with disasm disasm_functions rows, and instructions per listing to return inline; elfs, errors, upcalls and registered_by_code come back whole, and the whole report stays on disk"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
@@ -68,7 +69,7 @@ func (s *Service) Native(ctx context.Context, in NativeInput) (*Envelope, error)
 		return nil, err
 	}
 	noteUnknownNativeFlags(env, in.Disasm)
-	if err := s.finishNative(env, reportPath, ClampRows(in.MaxRows), in.Disasm); err != nil {
+	if err := s.finishNative(env, reportPath, ClampRows(in.MaxRows), in.Disasm, in.ListingOnly); err != nil {
 		return nil, err
 	}
 	return env, nil
@@ -82,7 +83,13 @@ func checkNativeDisasm(in NativeInput) error {
 		if len(in.Listing) > 0 {
 			return fmt.Errorf("listing only applies with disasm=true")
 		}
+		if in.ListingOnly {
+			return fmt.Errorf("listing_only only applies with disasm=true and a listing: without disasm, drakkar produces no listing to return alone")
+		}
 		return nil
+	}
+	if in.ListingOnly && len(in.Listing) == 0 {
+		return fmt.Errorf("listing_only needs a listing: without one there is no listing to return alone")
 	}
 	if d := in.DisasmDepth; d != nil && (*d < 0 || *d > nativeDisasmMaxDepth) {
 		return fmt.Errorf("disasm_depth %d is out of bounds: 0 to %d", *d, nativeDisasmMaxDepth)
@@ -191,8 +198,9 @@ type nativeMember struct {
 // finishNative puts summary, dex_available and dex_sources in the head and
 // three tails beside it: one row per ELF, the binding rows sorted by status then
 // java, and the report's errors. listings, when present, is a tail of its own.
-// With disasm, three more tails and four counters in the head.
-func (s *Service) finishNative(env *Envelope, path string, maxRows int, disasm bool) error {
+// With disasm, three more tails and four counters in the head. listingOnly
+// empties binding and the disasm tails, totals kept.
+func (s *Service) finishNative(env *Envelope, path string, maxRows int, disasm, listingOnly bool) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if env.Drakkar.ExitCode != 0 || env.Drakkar.TimedOut {
@@ -263,7 +271,18 @@ func (s *Service) finishNative(env *Envelope, path string, maxRows int, disasm b
 	if disasm {
 		addNativeDisasm(env, head, r.ELFs, maxRows)
 	}
+	if listingOnly {
+		for _, k := range []string{"disasm_functions", "binding", "upcalls", "registered_by_code"} {
+			env.Tails[k] = withheldTail(env.Tails[k])
+		}
+		env.note("listing_only: the disasm_functions, binding, upcalls and registered_by_code tails were withheld on request, their totals exact; the whole report is in report_path")
+	}
 	return nil
+}
+
+// withheldTail keeps a tail's total and none of its items.
+func withheldTail(t Tail) Tail {
+	return Tail{Total: t.Total, Truncated: t.Total > 0, Items: []any{}}
 }
 
 // addNativeDisasm summarises every disassembled function without its

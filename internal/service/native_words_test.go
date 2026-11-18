@@ -272,3 +272,32 @@ exit 1
 		t.Errorf("notes = %q", env.Notes)
 	}
 }
+
+// clap names the first option it does not know: the mode itself, or one of
+// its options on a drakkar that knows the mode.
+func TestNoteNativeModeRefusalNamesTheOption(t *testing.T) {
+	const predates = ": it predates the mode; drakkar_version shows which one is on PATH"
+	for _, c := range []struct {
+		flag, option, want string
+	}{
+		{"--native-words", "--native-words", "this drakkar does not know --native-words" + predates},
+		{"--native-words", "--native-words=*@2000:3", "this drakkar does not know --native-words" + predates},
+		{"--native-words", "--native-words-max", "this drakkar does not know --native-words-max: it knows the --native-words mode but not this option; drakkar_version shows which one is on PATH"},
+		{"--native-vtables", "--native-vtables", "this drakkar does not know --native-vtables" + predates},
+		{"--native-vtables", "--native-vtables-refs", "this drakkar does not know --native-vtables-refs: it knows the --native-vtables mode but not this option; drakkar_version shows which one is on PATH"},
+		{"--native-labels", "--native-labels", "this drakkar does not know --native-labels" + predates},
+		{"--native-labels", "--native-labels-fragment-fanout", "this drakkar does not know --native-labels-fragment-fanout: it knows the --native-labels mode but not this option; drakkar_version shows which one is on PATH"},
+	} {
+		line := "error: unexpected argument '" + c.option + "' found"
+		env := &Envelope{}
+		env.Drakkar.ExitCode = 2
+		env.Stderr.Text = line + "\n\nUsage: drakkar [OPTIONS] [APK]\n"
+		noteNativeModeRefusal(env, c.flag)
+		if len(env.Notes) != 2 || env.Notes[0] != c.want || env.Notes[1] != "Drakkar's message, verbatim: "+line {
+			t.Errorf("%s refused by %s: notes = %q", c.option, c.flag, env.Notes)
+		}
+		if e := env.Tails["errors"]; e.Total != 1 || e.Items[0] != line {
+			t.Errorf("%s refused by %s: errors = %+v, want Drakkar's message as is", c.option, c.flag, e)
+		}
+	}
+}

@@ -103,6 +103,7 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"With disasm, disasm_functions (one row per function, cut at max_rows), upcalls and registered_by_code are tails too, and the head gains disasm_functions_total, disasm_truncated, jni_calls_resolved and jni_calls_unresolved. " +
 			"Each disasm_functions row carries invalid_paths, how many invalid paths that function has (the objects themselves stay in report_path), and each elfs row carries invalid_paths_count, null without disasm or from a drakkar older than 0.2.3. " +
 			"With disasm, listing (<elf|*>@<hex address> or <elf|*>@<hex start>-<hex end>, end excluded) returns readable assembly inline: the listings tail, one entry per listing, with address, bytes, mnemonic, operands and a per-instruction comment, cut at max_rows instructions and flagged truncated per listing; a listing that cannot be produced is reported in errors. " +
+			"listing_only, with listing, returns the listings alone: disasm_functions, binding, upcalls and registered_by_code come back with no item, their exact totals and truncated when not empty, max_rows then caps only the instructions of each listing, and the whole report stays in report_path; the command sent to drakkar is the same. " +
 			"drakkar_legend with topic=native defines invalid_paths, invalid_paths_count and the opaque_dead_code anomaly. " +
 			"It extracts nothing: drakkar_extract_libs remains the tool for getting the files themselves. One APK or one raw ELF at a time." +
 			backgroundSentence,
