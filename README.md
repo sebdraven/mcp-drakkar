@@ -334,8 +334,10 @@ to it, and gives the `elfs[].path` the other tools take as `elf`. From there:
 - the instructions of a function, with `drakkar_native` `listing`, and where a
   value comes from, with `drakkar_native_symex`.
 
-These modes share their conventions. Each takes one APK or one raw ELF
-recognised by its magic. The server checks the form of a parameter only — hex
+The five modes that work on addresses of an AArch64 ELF — `drakkar_native_symex`,
+`drakkar_native_xrefs`, `drakkar_native_words`, `drakkar_native_vtables` and
+`drakkar_native_labels` — share their conventions. Each takes one APK or one raw
+ELF recognised by its magic. The server checks the form of a parameter only — hex
 addresses, list sizes, integers not negative — refuses before Drakkar runs when
 it is wrong, and leaves every other refusal to Drakkar. A parameter left out adds
 no option, so Drakkar's default applies. When Drakkar refuses a call and writes no
