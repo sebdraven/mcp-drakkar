@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -195,11 +196,19 @@ func nativeRow(entry map[string]any, v any, keys ...string) any {
 	return row
 }
 
+// unexpectedArgument is clap's refusal of an option it does not know.
+var unexpectedArgument = regexp.MustCompile(`unexpected argument '([^']+)'`)
+
 // noteNativeModeRefusal relays Drakkar's own message when it wrote no report.
 func noteNativeModeRefusal(env *Envelope, flag string) {
 	line := errorLine(env.Stderr.Text)
-	if strings.Contains(env.Stderr.Text, "unexpected argument '"+flag) {
-		env.note("this drakkar does not know " + flag + ": it predates the mode; drakkar_version shows which one is on PATH")
+	if m := unexpectedArgument.FindStringSubmatch(env.Stderr.Text); m != nil {
+		option := m[1]
+		if name, _, _ := strings.Cut(option, "="); name == flag {
+			env.note("this drakkar does not know " + flag + ": it predates the mode; drakkar_version shows which one is on PATH")
+		} else {
+			env.note("this drakkar does not know " + option + ": it knows the " + flag + " mode but not this option; drakkar_version shows which one is on PATH")
+		}
 	} else {
 		env.note("no JSON report was produced, which is consistent with the exit code above")
 	}
