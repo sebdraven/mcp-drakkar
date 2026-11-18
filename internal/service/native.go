@@ -27,7 +27,7 @@ type NativeInput struct {
 	Listing        []string `json:"listing,omitempty" jsonschema:"with disasm only: <elf path|*>@<hex address> or <elf path|*>@<hex start>-<hex end> (end excluded); prints the instructions of that function or range with per-instruction comments; the elf path is elfs[].path, the file name for a raw ELF"`
 	ListingOnly    bool     `json:"listing_only,omitempty" jsonschema:"with listing only: return the listings alone; the disasm_functions, binding, upcalls and registered_by_code tails come back empty with their exact totals, and max_rows then caps the instructions of each listing only; the whole report stays in report_path"`
 
-	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many binding rows, with disasm disasm_functions rows, and instructions per listing to return inline; elfs, errors, upcalls and registered_by_code come back whole, and the whole report stays on disk"`
+	MaxRows        *int `json:"max_rows,omitempty" jsonschema:"how many binding rows, with disasm disasm_functions rows, and instructions per listing to return inline; elfs, errors, upcalls and registered_by_code come back whole, and the whole report stays on disk; with listing_only it caps only the instructions of each listing"`
 	TimeoutSeconds *int `json:"timeout_seconds,omitempty" jsonschema:"override the timeout for this call"`
 }
 

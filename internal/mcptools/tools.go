@@ -23,7 +23,7 @@ import (
 const backgroundSentence = " With background=true it runs as a job detached from the request and answers at once with a job_id: use it for anything that may outlast a minute, then poll drakkar_job_status."
 
 // Instructions is handed to the client once, so that the envelope contract and
-// the path rules are not repeated in thirty-eight descriptions.
+// the path rules are not repeated in forty-two descriptions.
 const Instructions = `Drakkar is a static analysis engine for Android APKs and raw DEX files. Every tool here runs the drakkar binary found on PATH; this server never builds, installs or downloads it.
 
 Paths are parameters, given per call, and must be absolute — a relative one would be resolved against a working directory nobody chose. There is nothing to configure and no directory to declare in advance.
@@ -43,7 +43,7 @@ Read stderr and notes before the numbers. A non-zero exit code or a non-zero fai
 
 drakkar.complete is true only when drakkar exited 0, did not time out, was not cancelled and its stdout was not cut. complete=false means partial output, whatever the files look like: a report list that is a prefix of the batch, a rows.json written from half a stdout. rows.json and lines.json carry the same complete flag.
 
-Any call that may run past a minute — a bulk directory, drakkar_diff_matrix, drakkar_diff_dex, drakkar_diff_explain, drakkar_decompile, drakkar_dart_snapshot, drakkar_native_strings, drakkar_bundle, drakkar_scan, drakkar_native with disasm, drakkar_native_symex, drakkar_native_xrefs, drakkar_native_words, drakkar_native_vtables, drakkar_native_labels — should pass background=true with an out_dir: a client or bridge that gives up on a request cancels it, and drakkar with it. The call then answers at once with a job_id; drakkar_job_status gives the state and, once the job has ended, the envelope. At most DRAKKAR_MAX_JOBS jobs run at once. Every call that ran drakkar leaves envelope.json in its output directory, the whole envelope: the on-disk record of what the call gave, even when the answer never reached the client.
+Any call that may run past a minute — a bulk directory, drakkar_diff_matrix, drakkar_diff_dex, drakkar_diff_explain, drakkar_decompile, drakkar_dart_snapshot, drakkar_native_strings, drakkar_bundle, drakkar_scan, drakkar_native with disasm, drakkar_native_symex, drakkar_native_xrefs, drakkar_native_words, drakkar_native_vtables, drakkar_native_labels, drakkar_native_find, drakkar_native_slice, drakkar_native_async_graph, drakkar_native_fields — should pass background=true with an out_dir: a client or bridge that gives up on a request cancels it, and drakkar with it. The call then answers at once with a job_id; drakkar_job_status gives the state and, once the job has ended, the envelope. At most DRAKKAR_MAX_JOBS jobs run at once. Every call that ran drakkar leaves envelope.json in its output directory, the whole envelope: the on-disk record of what the call gave, even when the answer never reached the client.
 
 Flags with a Drakkar default are omitted unless you set them, so Drakkar decides. SHA-256 values are never truncated, here or anywhere in the output.`
 
@@ -63,7 +63,8 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Description: "Print Drakkar's own legend for a mode: the labels it emits and the rules it derives them by. " +
 			"These texts are where a metric's limits are stated — that orphan means unreferenced from code and not unused, that the near-class threshold is a parameter of the tool and not a published empirical value — so read the legend before interpreting a number from the matching mode. " +
 			"Topic native defines invalid_paths, invalid_paths_count and opaque_dead_code as drakkar_native reports them, and, with a Drakkar that has --native-symex, every field, status and expression form of drakkar_native_symex in its SYMEX section, and, with a Drakkar that has --native-xrefs, every field, kind and limit of drakkar_native_xrefs in its XREFS section, " +
-			"and, with a Drakkar that has the mode, every field and limit of drakkar_native_words in its WORDS section, of drakkar_native_vtables in its VTABLES section and of drakkar_native_labels in its LABELS section. " +
+			"and, with a Drakkar that has the mode, every field and limit of drakkar_native_words in its WORDS section, of drakkar_native_vtables in its VTABLES section and of drakkar_native_labels in its LABELS section, " +
+			"and of drakkar_native_find in its FIND section, of drakkar_native_slice in its SLICE section, of drakkar_native_async_graph in its ASYNC_GRAPH section and of drakkar_native_fields in its FIELDS section. " +
 			"Topic dart_snapshot defines heuristic, the values of layout_source, the keys of rejected and the calibration outcomes as drakkar_dart_snapshot reports them; it needs Drakkar 0.5.0. " +
 			"Topic native_strings defines boundary, encoding, every summary counter, xrefs, crates and the cryptographic constants as drakkar_native_strings reports them; it needs Drakkar 0.6.0. " +
 			"Reads no sample.",
@@ -158,6 +159,46 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"A refusal from Drakkar, an unknown option or an invalid argument, comes back verbatim in errors and in the notes. drakkar_legend with topic native defines every field in its LABELS section." +
 			backgroundSentence,
 	}, r.nativeLabels)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_native_find",
+		Description: "Over the whole code of an AArch64 ELF in an APK or of one raw ELF, with no execution, the instructions that read (load) or write (store) a structure field at a given offset from a base register, ldr and str families and pairs included, or form its address (addr: add or sub of an immediate): per-function counts by offset, to find the functions that copy a field from one structure to another. " +
+			"offsets is required, 1 to 16 hex offsets, a leading - allowed; elf names the ELF, or * (the default) takes every AArch64 ELF; access keeps a subset of load, store, addr; size keeps widths among 1, 2, 4, 8, 16; base is any, sp or nosp, Drakkar leaving sp out by default; in lists 1 to 64 hex addresses, keeping the functions containing one; max caps the matches per ELF in Drakkar; each one left out adds no option, so Drakkar's default applies. " +
+			"The head is one entry per ELF with every ELF-level field of the report as is (elf, matches_total, functions_total, truncated and any other); the functions tail holds every function whole with its counts, a list Drakkar never caps, and the matches tail every match whole, each with its elf, both cut at max_rows; errors comes back as is; a note gives the exact totals and recalls the filters when Drakkar cut the matches, and another says when an ELF has no match. " +
+			"An offset names a field only within one given structure, so the result is a list of candidates; an access through a pointer computed first shows as addr; an access inside an outlined fragment is reported in the fragment, not in its callers; an offset held in a register, or a copy through memcpy, escapes the mode; the limits of the code walk apply. " +
+			"A refusal from Drakkar, an unknown option or an invalid argument, comes back verbatim in errors and in the notes. drakkar_legend with topic native defines every field in its FIND section." +
+			backgroundSentence,
+	}, r.nativeFind)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_native_slice",
+		Description: "Where a value comes from, with no execution: from a register or a memory zone read just before an instruction of one AArch64 function, Drakkar walks the data flow graph backwards on every path at once, without enumerating paths, until a fixed point, and lists the sources: arg (a register at entry), init_mem (memory at entry), const, global (a formed address), call (a call that may write the value), indirect_call, unknown; each with the part of the requested location it covers (bytes) and a witness chain of defining instructions. " +
+			"function, <elf path|*>@<hex address>, and at, 1 to 16 queries <hex address>:<location> where location is a register (x8, sp) or <register>+<offset>:<length> (x0+0x5a9:1), are required; depth sets the levels of called functions followed, outlined fragments being always walked through; follow lists call addresses followed whatever the depth; max_steps bounds the fixed point and max_sources the sources per query in Drakkar; each one left out adds no option, so Drakkar's default applies. " +
+			"The head is one entry per function with elf, fn_start, fn_end, bound and its queries without their sources (at, location, complete, steps, sources_total, sources_truncated); the sources tail holds every source whole, chain included, with the elf and fn_start of its function and the at and location of its query as query_at and query_location, cut at max_rows; errors comes back as is; a note names each query with complete false, a partial result, and each query without source. " +
+			"Every path of the flow graph is covered, impossible ones included: sources may be too many, never too few within the model and the budget, and complete says whether the budget cut. Different memory bases are assumed disjoint: a write through a pointer computed otherwise is not seen. A write made by a called function that is not followed comes out as a call source, not as a value. An unresolved indirect jump cuts the walk on that path, with an unknown source. " +
+			"A refusal from Drakkar, an unknown option or an invalid argument, comes back verbatim in errors and in the notes. drakkar_legend with topic native defines every field in its SLICE section." +
+			backgroundSentence,
+	}, r.nativeSlice)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_native_async_graph",
+		Description: "A graph of the functions of an AArch64 ELF, with no execution, whose edges carry their proof: call when F holds a bl or b to the start of G, makes when F forms the address of a Rust method table of which G is a method or the destructor — an async task or a closure passed as a trait object is such a table, so the graph crosses indirect calls. Use it to see how one gets from function A to function B. An edge leaving an outlined fragment is raised to each of its callers (via_fragment); data words holding a table's address come apart in stores. " +
+			"At least one query is required: from (1 to 64 hex addresses: descendants of the functions containing them), to (ancestors), path (pairs <hex a>:<hex b>: shortest paths, at most 16 per pair); elf names the ELF, or * (the default) takes every AArch64 ELF; depth bounds from and to and the path length; max caps the nodes per query in Drakkar; kinds keeps a subset of call, makes; each one left out adds no option, so Drakkar's default applies. " +
+			"The head is one entry per ELF (elf, tables_total and any other ELF-level field) with its queries reduced to kind, requested, resolved, nodes_total, edges_total, truncated and paths_total for path; the nodes, edges, paths and stores tails hold every item whole, each with its elf and the index of its query (query), a path coming as edges, each tail cut at max_rows; errors comes back as is; a note gives the exact totals when Drakkar cut a query, and another names a path query without path. " +
+			"makes says that F creates an object of which G is a method, not that G is called, nor when. A table passed through a structure field or an argument escapes the graph: only its creation is seen, so an absent path is not proof. The limits of table detection and of reference search apply. A path is a possible path, not an executed one. " +
+			"A refusal from Drakkar, an unknown option or an invalid argument, comes back verbatim in errors and in the notes. drakkar_legend with topic native defines every field in its ASYNC_GRAPH section." +
+			backgroundSentence,
+	}, r.nativeAsyncGraph)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_native_fields",
+		Description: "Per function of an AArch64 ELF, with no execution, the field names a deserializer generated by serde or prost references, often several times in the same function: the functions referencing many of them are the structures the binary reads from JSON or protobuf. A candidate name is a string of 2 to 64 characters with proven bounds (rust_fatptr or rust_code) shaped like an identifier; a name referenced in an outlined fragment goes to each caller (via_fragment); struct_names lists the referenced strings shaped like a type name; callers lists the direct calls to the function. The mode does not say where a field is stored: sites gives the instructions to start drakkar_native_slice or drakkar_native_symex from. " +
+			"elf names the ELF, or * (the default) takes every AArch64 ELF; fn lists 1 to 64 hex addresses, keeping the functions containing one, candidates or not; name lists exact names, case sensitive; min sets the distinct names of a candidate deserializer; fragment_fanout the callers above which a fragment's name is neither counted nor rendered; max caps the functions per ELF in Drakkar; each one left out adds no option, so Drakkar's default applies. " +
+			"The head is one entry per ELF with every ELF-level field of the report as is (elf, functions_total, functions_matched, truncated and any other); the functions tail holds every function whole, fields, sites, struct_names and callers included, each with its elf, cut at max_rows; errors comes back as is; a note gives the exact totals and recalls the filters when Drakkar cut the list, and another says when no function matched. " +
+			"A referenced identifier is not necessarily a field: a column name, a configuration key or an enum variant has the same shape. A function that reads its names through a data table rather than through addresses formed in code escapes the mode. The mode says neither where a field is stored nor its type. The limits of string references and of fragment attachment apply. " +
+			"A refusal from Drakkar, an unknown option or an invalid argument, comes back verbatim in errors and in the notes. drakkar_legend with topic native defines every field in its FIELDS section." +
+			backgroundSentence,
+	}, r.nativeFields)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_native_arch",
@@ -443,6 +484,30 @@ func (r *registry) nativeVtables(ctx context.Context, _ *mcp.CallToolRequest, in
 func (r *registry) nativeLabels(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeLabelsInput) (*mcp.CallToolResult, *service.Envelope, error) {
 	return r.run(ctx, service.Call{Tool: "drakkar_native_labels", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
 		return r.svc.NativeLabels(ctx, in)
+	})
+}
+
+func (r *registry) nativeFind(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeFindInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	return r.run(ctx, service.Call{Tool: "drakkar_native_find", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.NativeFind(ctx, in)
+	})
+}
+
+func (r *registry) nativeSlice(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeSliceInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	return r.run(ctx, service.Call{Tool: "drakkar_native_slice", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.NativeSlice(ctx, in)
+	})
+}
+
+func (r *registry) nativeAsyncGraph(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeAsyncGraphInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	return r.run(ctx, service.Call{Tool: "drakkar_native_async_graph", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.NativeAsyncGraph(ctx, in)
+	})
+}
+
+func (r *registry) nativeFields(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeFieldsInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	return r.run(ctx, service.Call{Tool: "drakkar_native_fields", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.NativeFields(ctx, in)
 	})
 }
 
