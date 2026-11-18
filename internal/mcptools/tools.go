@@ -23,7 +23,7 @@ import (
 const backgroundSentence = " With background=true it runs as a job detached from the request and answers at once with a job_id: use it for anything that may outlast a minute, then poll drakkar_job_status."
 
 // Instructions is handed to the client once, so that the envelope contract and
-// the path rules are not repeated in thirty-five descriptions.
+// the path rules are not repeated in thirty-eight descriptions.
 const Instructions = `Drakkar is a static analysis engine for Android APKs and raw DEX files. Every tool here runs the drakkar binary found on PATH; this server never builds, installs or downloads it.
 
 Paths are parameters, given per call, and must be absolute — a relative one would be resolved against a working directory nobody chose. There is nothing to configure and no directory to declare in advance.
@@ -43,7 +43,7 @@ Read stderr and notes before the numbers. A non-zero exit code or a non-zero fai
 
 drakkar.complete is true only when drakkar exited 0, did not time out, was not cancelled and its stdout was not cut. complete=false means partial output, whatever the files look like: a report list that is a prefix of the batch, a rows.json written from half a stdout. rows.json and lines.json carry the same complete flag.
 
-Any call that may run past a minute — a bulk directory, drakkar_diff_matrix, drakkar_diff_dex, drakkar_diff_explain, drakkar_decompile, drakkar_dart_snapshot, drakkar_native_strings, drakkar_bundle, drakkar_scan, drakkar_native with disasm, drakkar_native_symex, drakkar_native_xrefs — should pass background=true with an out_dir: a client or bridge that gives up on a request cancels it, and drakkar with it. The call then answers at once with a job_id; drakkar_job_status gives the state and, once the job has ended, the envelope. At most DRAKKAR_MAX_JOBS jobs run at once. Every call that ran drakkar leaves envelope.json in its output directory, the whole envelope: the on-disk record of what the call gave, even when the answer never reached the client.
+Any call that may run past a minute — a bulk directory, drakkar_diff_matrix, drakkar_diff_dex, drakkar_diff_explain, drakkar_decompile, drakkar_dart_snapshot, drakkar_native_strings, drakkar_bundle, drakkar_scan, drakkar_native with disasm, drakkar_native_symex, drakkar_native_xrefs, drakkar_native_words, drakkar_native_vtables, drakkar_native_labels — should pass background=true with an out_dir: a client or bridge that gives up on a request cancels it, and drakkar with it. The call then answers at once with a job_id; drakkar_job_status gives the state and, once the job has ended, the envelope. At most DRAKKAR_MAX_JOBS jobs run at once. Every call that ran drakkar leaves envelope.json in its output directory, the whole envelope: the on-disk record of what the call gave, even when the answer never reached the client.
 
 Flags with a Drakkar default are omitted unless you set them, so Drakkar decides. SHA-256 values are never truncated, here or anywhere in the output.`
 
@@ -62,7 +62,8 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Name: "drakkar_legend",
 		Description: "Print Drakkar's own legend for a mode: the labels it emits and the rules it derives them by. " +
 			"These texts are where a metric's limits are stated — that orphan means unreferenced from code and not unused, that the near-class threshold is a parameter of the tool and not a published empirical value — so read the legend before interpreting a number from the matching mode. " +
-			"Topic native defines invalid_paths, invalid_paths_count and opaque_dead_code as drakkar_native reports them, and, with a Drakkar that has --native-symex, every field, status and expression form of drakkar_native_symex in its SYMEX section, and, with a Drakkar that has --native-xrefs, every field, kind and limit of drakkar_native_xrefs in its XREFS section. " +
+			"Topic native defines invalid_paths, invalid_paths_count and opaque_dead_code as drakkar_native reports them, and, with a Drakkar that has --native-symex, every field, status and expression form of drakkar_native_symex in its SYMEX section, and, with a Drakkar that has --native-xrefs, every field, kind and limit of drakkar_native_xrefs in its XREFS section, " +
+			"and, with a Drakkar that has the mode, every field and limit of drakkar_native_words in its WORDS section, of drakkar_native_vtables in its VTABLES section and of drakkar_native_labels in its LABELS section. " +
 			"Topic dart_snapshot defines heuristic, the values of layout_source, the keys of rejected and the calibration outcomes as drakkar_dart_snapshot reports them; it needs Drakkar 0.5.0. " +
 			"Topic native_strings defines boundary, encoding, every summary counter, xrefs, crates and the cryptographic constants as drakkar_native_strings reports them; it needs Drakkar 0.6.0. " +
 			"Reads no sample.",
@@ -126,6 +127,36 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"A refusal from Drakkar, an unknown option or an invalid argument, comes back verbatim in errors and in the notes. drakkar_legend with topic native defines every field in its XREFS section." +
 			backgroundSentence,
 	}, r.nativeXrefs)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_native_words",
+		Description: "Read 8-byte words at addresses of an AArch64 ELF in an APK or of one raw ELF, with no execution, relative relocations applied, and what each word designates: code (with the function holding it and whether it is that function's start), data (with its section and a preview of the text there), a plain integer, or nothing (no bytes in the file); plus, per range, whether its first three words have the shape of a Rust vtable header (vtable_like, with size and align). " +
+			"ranges lists 1 to 64 <hex address>:<count> items, count from 1 to 512 words; elf names the ELF, or * (the default) takes every AArch64 ELF with an allocated section holding the start of the range. " +
+			"The head is one summary per range (elf, start, count, vtable_like, and size and align when present); the words tail holds the words of every range in the report's order, each with the elf and start of its range, cut at max_rows; errors comes back as is. " +
+			"vtable_like is a hint, not a proof: any three words can have that shape, and drakkar_native_vtables is the tool that lists the tables. Only relative relocations are applied: a word relocated by R_AARCH64_ABS64 or a packed APS2 format keeps its file value. " +
+			"A refusal from Drakkar, an unknown option or an invalid argument, comes back verbatim in errors and in the notes. drakkar_legend with topic native defines every field in its WORDS section." +
+			backgroundSentence,
+	}, r.nativeWords)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_native_vtables",
+		Description: "List the Rust method tables (vtables) of an AArch64 ELF in an APK or of one raw ELF, found by their shape with no execution, and filter them: the tables holding a given function and at which offset (fn), the tables with a method at an offset (slot), the tables of a size (size), the table at an address (at); with refs, the instructions and data words carrying each table's address, that is who builds it. " +
+			"elf names the ELF, or * (the default) takes every AArch64 ELF; fn and at list 1 to 64 hex addresses; slot and size are 0x hex or decimal; max caps the tables per ELF in Drakkar; each filter left out adds no option, so Drakkar's default applies. " +
+			"The head is one summary per ELF (elf, tables_total, tables_matched, truncated); the tables tail holds every table whole (vaddr, section, drop, size, align, methods_count, methods, and matched, addr_refs and data_refs when present), each with its elf, cut at max_rows; errors comes back as is; a note gives the exact totals and recalls the filters when Drakkar cut the list, and another says when no table matched. " +
+			"The mode returns candidates: a function in a table does not prove that a given indirect call targets it, and detection is structural — a block of data with that shape is rendered as a table, a table without method, or relocated other than by a relative relocation, is not found, and two adjacent tables can be merged. " +
+			"A refusal from Drakkar, an unknown option or an invalid argument, comes back verbatim in errors and in the notes. drakkar_legend with topic native defines every field in its VTABLES section." +
+			backgroundSentence,
+	}, r.nativeVtables)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "drakkar_native_labels",
+		Description: "For each function of an AArch64 ELF in an APK or of one raw ELF, with no execution, the strings it references and a readable label, in this order: a function name (label_kind fn_name: the identifier after a leading \"] \", or a lowercase bracketed tag holding \"_\"), else a log tag (log_tag), else a .rs source path (source_path), else none: the inverse index of drakkar_native_strings xrefs, per function instead of per string. Use it to name the functions of a stripped Rust binary, and to find the functions referencing a text (match). " +
+			"elf names the ELF, or * (the default) takes every AArch64 ELF; fn lists 1 to 64 hex addresses, keeping the functions that contain one; match lists substrings, case ignored; max caps the functions per ELF and strings_max the strings per function in Drakkar; fragment_fanout sets the callers above which a fragment's strings are shared; each one left out adds no option, so Drakkar's default applies. " +
+			"The head is one entry per ELF with every ELF-level counter of the report as is (functions_total, functions_matched, truncated and any other); the functions tail holds every function whole, every field as Drakkar writes it, each with its elf, cut at max_rows; errors comes back as is; a note gives the exact totals and recalls the filters when Drakkar cut the list, and another says when no function matched. " +
+			"The label is a reading aid, not a proven name. A string attached through a small fragment (via_fragment) belongs to one of the fragment's callers, not necessarily to all of them; when the fragment has more than fragment_fanout callers, the string is shared: it stays in strings but serves neither the label nor match, and a function whose strings are all shared is rendered only when fn asks for it. A function whose strings escape the scan (computed address, ADRP and ADD far apart) does not appear. " +
+			"A refusal from Drakkar, an unknown option or an invalid argument, comes back verbatim in errors and in the notes. drakkar_legend with topic native defines every field in its LABELS section." +
+			backgroundSentence,
+	}, r.nativeLabels)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "drakkar_native_arch",
@@ -393,6 +424,24 @@ func (r *registry) nativeSymex(ctx context.Context, _ *mcp.CallToolRequest, in s
 func (r *registry) nativeXrefs(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeXrefsInput) (*mcp.CallToolResult, *service.Envelope, error) {
 	return r.run(ctx, service.Call{Tool: "drakkar_native_xrefs", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
 		return r.svc.NativeXrefs(ctx, in)
+	})
+}
+
+func (r *registry) nativeWords(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeWordsInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	return r.run(ctx, service.Call{Tool: "drakkar_native_words", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.NativeWords(ctx, in)
+	})
+}
+
+func (r *registry) nativeVtables(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeVtablesInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	return r.run(ctx, service.Call{Tool: "drakkar_native_vtables", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.NativeVtables(ctx, in)
+	})
+}
+
+func (r *registry) nativeLabels(ctx context.Context, _ *mcp.CallToolRequest, in service.NativeLabelsInput) (*mcp.CallToolResult, *service.Envelope, error) {
+	return r.run(ctx, service.Call{Tool: "drakkar_native_labels", Background: in.Background, OutDir: in.OutDir}, func(ctx context.Context) (*service.Envelope, error) {
+		return r.svc.NativeLabels(ctx, in)
 	})
 }
 

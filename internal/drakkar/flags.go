@@ -68,7 +68,7 @@ func init() {
 	// --native-dex and --native-listing: Drakkar main, not yet in a tag
 	known["--native-dex"] = multiFlag
 	known["--native-listing"] = multiFlag
-	// --native-symex and its options: Drakkar branch feat/native-symex, not yet merged.
+	// --native-symex and its options: Drakkar main, Cargo.toml version 0.6.1 (not in the v0.6.1 tag).
 	// Drakkar splits the list options on commas; they go as one joined value.
 	known["--native-symex"] = valueFlag
 	known["--native-symex-watch"] = valueFlag
@@ -82,10 +82,29 @@ func init() {
 	known["--native-symex-refine"] = valueFlag
 	known["--native-symex-follow"] = valueFlag
 	known["--native-symex-undirected"] = switchFlag
-	// --native-xrefs and its cap: Drakkar branch kepler/feat/native-symex (340dc91), not yet merged.
+	// --native-xrefs and its cap: Drakkar main, Cargo.toml version 0.6.1 (not in the v0.6.1 tag).
 	// Drakkar repeats --native-xrefs; the server passes one spec.
 	known["--native-xrefs"] = valueFlag
 	known["--native-xrefs-max"] = valueFlag
+	// --native-words, --native-vtables and its options: Drakkar main, Cargo.toml version 0.6.1
+	// (not in the v0.6.1 tag). Drakkar repeats --native-words; the server passes one spec.
+	// Drakkar splits the address lists on commas; they go as one joined value.
+	known["--native-words"] = valueFlag
+	known["--native-vtables"] = valueFlag
+	known["--native-vtables-fn"] = valueFlag
+	known["--native-vtables-slot"] = valueFlag
+	known["--native-vtables-size"] = valueFlag
+	known["--native-vtables-at"] = valueFlag
+	known["--native-vtables-max"] = valueFlag
+	known["--native-vtables-refs"] = switchFlag
+	// --native-labels and its options: Drakkar branch feat/native-labels, not yet merged.
+	// Drakkar splits --native-labels-fn and --native-labels-match on commas.
+	known["--native-labels"] = valueFlag
+	known["--native-labels-fn"] = valueFlag
+	known["--native-labels-match"] = valueFlag
+	known["--native-labels-max"] = valueFlag
+	known["--native-labels-strings-max"] = valueFlag
+	known["--native-labels-fragment-fanout"] = valueFlag
 	// --dart-snapshot and its options: Drakkar 0.5.0
 	known["--dart-snapshot"] = switchFlag
 	known["--dart-max-rows"] = valueFlag

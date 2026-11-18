@@ -59,13 +59,16 @@ refuses with the same message.
 | Tool | What it answers |
 |---|---|
 | `drakkar_version` | which Drakkar is in use, which one this server was written against, the timeouts, and where output lands by default |
-| `drakkar_legend` | Drakkar's own legend for a mode: where a metric's limits are stated; topic `native` covers `drakkar_native`, including its disasm labels, `drakkar_native_symex` in its SYMEX section and `drakkar_native_xrefs` in its XREFS section, topic `dart_snapshot` covers `drakkar_dart_snapshot`, and topic `native_strings` covers `drakkar_native_strings` |
+| `drakkar_legend` | Drakkar's own legend for a mode: where a metric's limits are stated; topic `native` covers `drakkar_native`, including its disasm labels, `drakkar_native_symex` in its SYMEX section, `drakkar_native_xrefs` in its XREFS section, `drakkar_native_words` in its WORDS section, `drakkar_native_vtables` in its VTABLES section and `drakkar_native_labels` in its LABELS section, topic `dart_snapshot` covers `drakkar_dart_snapshot`, and topic `native_strings` covers `drakkar_native_strings` |
 | `drakkar_manifest` | permissions, components, intent filters, derived entry points |
 | `drakkar_cert` | signature schemes v1/v2/v3/v3.1 and the X.509 certificates |
 | `drakkar_dating` | raw dating indicators — no date is ever estimated |
 | `drakkar_native` | every ELF found by content, its JNI exports and tables, and the binding of DEX native methods to them; with `disasm`, the static disassembly of every JNI-bound function, `JNI_OnLoad` and the `init_array` constructors — JNIEnv calls decoded, PLT imports called, strings referenced — bounded by `disasm_depth` (0–3) and `disasm_max_insns` (1–20000), instructions left in `report.json`; each `disasm_functions` row counts its `invalid_paths` and each `elfs` row carries `invalid_paths_count` (null without `disasm` or before Drakkar 0.2.3), both defined by `drakkar_legend` topic `native` |
 | `drakkar_native_symex` | static symbolic propagation, with no execution, through one AArch64 function of an ELF: the symbolic value at each watched instruction, the calls met on the way and, on request, the bytes of memory a register points to — see [below](#following-a-value-through-a-native-function) |
 | `drakkar_native_xrefs` | static cross-references, with no execution, to addresses of an AArch64 ELF: the function holding each one, the branches to it, the instructions forming its address and the data words holding it — see [below](#finding-what-refers-to-a-native-address) |
+| `drakkar_native_words` | 8-byte words read, with no execution, at addresses of an AArch64 ELF, relative relocations applied: what each designates (a function's start or inside, data with a text preview, an integer) and whether a range looks like a Rust vtable header — a hint, not a proof — see [below](#reading-native-data-words) |
+| `drakkar_native_vtables` | the Rust method tables of an AArch64 ELF, found by their shape with no execution, filtered by function, slot, size or address, and on request who builds each one — candidates, not proofs — see [below](#listing-rust-method-tables) |
+| `drakkar_native_labels` | per function of an AArch64 ELF, with no execution, the strings it references and a readable label from its log tags or source paths, to name the functions of a stripped Rust binary — a reading aid, not a proven name — see [below](#labelling-native-functions-by-their-strings) |
 | `drakkar_native_arch` | ABI, word size and machine of each `.so` under `lib/` |
 | `drakkar_dart_snapshot` | the Dart AOT snapshot blobs of a Flutter app's `libapp.so`: where each blob is, its header (`version_hash` whole, `kind`, `features`, `compressed_pointers`), the serialized / data image split, and per section the counts of a heuristic string enumeration whose entries stay in `report.json`; calibration is optional and needs witnesses, `out_dir` is required — see [below](#reading-a-flutter-snapshot) |
 | `drakkar_native_strings` | the strings of every ELF in an APK, an XAPK (base and ABI splits) or a raw ELF, each with how its boundary was found (`nul`, `rust_fatptr`, `rust_code`, `heuristic`), plus cryptographic constants and `format_arrays`, the arrays of contiguous Rust `{ptr, len}` pairs (format string pieces or `&str` tables); with `xrefs`, the AArch64 instructions forming each address; with `crates`, Rust crates and statically linked C libraries. Per ELF the summary comes back as is, the strings and the format arrays as two previews, each cut at `max_rows` with its total; the whole report is `<out_dir>/<sha256>.native_strings.json`. `out_dir` is required; needs Drakkar 0.6.0, and 0.6.1 for `format_arrays` |
@@ -210,9 +213,10 @@ every field: what `heuristic` means, the values of `layout_source`, the keys of
 `drakkar_native_symex` runs `drakkar <apk> --native --native-symex=<function>`
 with the options below: a propagation of symbolic values through one AArch64
 function, path by path, with no execution and no solver. It answers where the
-value read or written at each watched instruction comes from. The mode is on
-Drakkar's `feat/native-symex` branch; a Drakkar without it refuses the option,
-and its message comes back verbatim in `errors` and in the notes.
+value read or written at each watched instruction comes from. The mode is in
+Drakkar 0.6.1 as its `main` declares it in `Cargo.toml` (the `v0.6.1` tag predates
+it); a Drakkar without it refuses the option, and its message comes back verbatim
+in `errors` and in the notes.
 
 ```text
 drakkar_native_symex {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/symex",
@@ -262,8 +266,9 @@ expression form in its SYMEX section.
 for each address of an AArch64 ELF, with no execution, the function that holds
 it, the direct branches to it (a function's callers), the instructions that form
 or access its address, and the data words that hold it (method tables). The mode
-is on Drakkar's `kepler/feat/native-symex` branch; a Drakkar without it refuses
-the option, and its message comes back verbatim in `errors` and in the notes.
+is in Drakkar 0.6.1 as its `main` declares it in `Cargo.toml` (the `v0.6.1` tag
+predates it); a Drakkar without it refuses the option, and its message comes back
+verbatim in `errors` and in the notes.
 
 ```text
 drakkar_native_xrefs {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/xrefs",
@@ -306,6 +311,178 @@ No reference is not a proof of absence: an indirect branch (`br`, `blr`), a
 computed address, an ADRP and its ADD or LDR far apart, a jump table, or code
 that is encrypted or generated at run time escape the search. A target with no
 reference in any of the three lists gets a note saying so.
+
+### Reading native data words
+
+`drakkar_native_words` runs `drakkar <apk> --native --native-words=<elf|*>@<ranges>`:
+8-byte words read at addresses of an AArch64 ELF, with no execution, relative
+relocations applied, and what each one designates. The mode is in Drakkar 0.6.1
+as its `main` declares it in `Cargo.toml` (the `v0.6.1` tag predates it); a
+Drakkar without it refuses the option, and its message comes back verbatim in
+`errors` and in the notes.
+
+```text
+drakkar_native_words {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/words",
+                      "elf": "lib/arm64-v8a/libfoo.so",
+                      "ranges": ["36ffbd0:6", "0x4a3c08:3"]}
+→ argv: /corpus/sample.apk --native --native-words=lib/arm64-v8a/libfoo.so@36ffbd0:6,0x4a3c08:3
+        --format=json --json-out=/cases/2026-11/words/report.json
+  result.ranges[]: elf, start, count, vtable_like, size, align
+  tails.words: index, offset, vaddr, section, raw, value, relocated, kind, function,
+               at_start, target_section, text, text_truncated, elf, start
+  tails.errors
+  report_path = /cases/2026-11/words/report.json
+```
+
+| Parameter | |
+|---|---|
+| `apk` | required, absolute: one APK, or one raw ELF |
+| `elf` | path of the ELF in the APK (`elfs[].path` of `drakkar_native`, the file name for a raw ELF), or `*`; omitted, `*`: every AArch64 ELF with an allocated section holding the start of the range |
+| `ranges` | required: 1 to 64 `<hex address>:<count>` items, `0x` optional, count decimal from 1 to 512, joined after `<elf>@` into `--native-words` |
+| `out_dir`, `background`, `max_rows`, `timeout_seconds` | as for `drakkar_native_xrefs`, timeout class included |
+
+The server checks the form only — each range `address:count`, a hex address, a
+count from 1 to 512, 1 to 64 ranges — and leaves every other refusal to Drakkar,
+an address not aligned on 8 among them.
+
+The head has one entry per range as Drakkar gives it, without its words; `size`
+and `align` are there only when `vtable_like` is true. The `words` tail holds the
+words of every range in the report's order, each with the `elf` and `start` of its
+range, cut at `max_rows`. `kind` is `code` (with `function` and `at_start`), `data`
+(with `target_section`, and `text` and `text_truncated` when the target is text),
+`int`, or `none` when the word has no bytes in the file (no `raw`, no `value`). A
+field absent from the report stays absent. `drakkar_legend` with topic `native`
+defines every field in its WORDS section.
+
+`vtable_like` is a hint, not a proof: any three words can have the shape of a
+Rust vtable header, and a note says so whenever one range has it;
+`drakkar_native_vtables` is the tool that lists the tables. Only relative
+relocations are applied: a word relocated by `R_AARCH64_ABS64` or by a packed
+APS2 format keeps its file value. In a position-independent ELF a word that is
+not relocated is always `int`.
+
+### Listing Rust method tables
+
+`drakkar_native_vtables` runs `drakkar <apk> --native --native-vtables=<elf|*>`
+with the filters below: the Rust method tables (destructor, size, alignment,
+methods) of an AArch64 ELF, recognised by their shape in read-only and RELRO
+data, with no execution. The mode is in Drakkar 0.6.1 as its `main` declares it
+in `Cargo.toml` (the `v0.6.1` tag predates it); a Drakkar without it refuses the
+option, and its message comes back verbatim in `errors` and in the notes.
+
+```text
+drakkar_native_vtables {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/vtables",
+                        "elf": "lib/arm64-v8a/libfoo.so",
+                        "fn": ["36ffbd0"], "refs": true}
+→ argv: /corpus/sample.apk --native --native-vtables=lib/arm64-v8a/libfoo.so
+        --native-vtables-fn=36ffbd0 --native-vtables-refs
+        --format=json --json-out=/cases/2026-11/vtables/report.json
+  result.vtables[]: elf, tables_total, tables_matched, truncated
+  tails.tables: vaddr, section, drop, size, align, methods_count, methods[],
+                matched, addr_refs, data_refs, elf
+  tails.errors
+  report_path = /cases/2026-11/vtables/report.json
+```
+
+| Parameter | |
+|---|---|
+| `apk` | required, absolute: one APK, or one raw ELF |
+| `elf` | path of the ELF in the APK, or `*`; omitted, `*`: every AArch64 ELF |
+| `fn` | `--native-vtables-fn`: 1 to 64 hex addresses; keep the tables whose destructor or a method is one of them, each then with `matched`, the offsets where it was found (`0x0` for the destructor) |
+| `slot` | `--native-vtables-slot`: offset, `0x` hex or decimal; keep the tables with a method there (Drakkar wants a multiple of 8, at least `0x18`) |
+| `size` | `--native-vtables-size`: `0x` hex or decimal; keep the tables of that size |
+| `at` | `--native-vtables-at`: 1 to 64 hex addresses; keep the tables starting at one of them |
+| `max` | `--native-vtables-max`: tables Drakkar renders per ELF; `tables_total` and `tables_matched` stay exact |
+| `refs` | `--native-vtables-refs`: the instructions forming and the data words holding each rendered table's address, that is who builds it |
+| `out_dir`, `background`, `max_rows`, `timeout_seconds` | as for `drakkar_native_xrefs`, timeout class included |
+
+A parameter left out adds no option, so Drakkar's default applies; filters
+combine with AND. The server checks the form only — hex addresses, lists of 1 to
+64 distinct addresses, `slot` and `size` in `0x` hex or decimal and passed as
+given, `max` not negative — and leaves every other refusal to Drakkar.
+
+The head has one entry per ELF with its counters as Drakkar gives them. The
+`tables` tail holds every table whole, `methods` (offset, value, function),
+`matched`, `addr_refs` and `data_refs` included when present, each with its
+`elf`, cut at `max_rows`. When Drakkar cut the list itself (`truncated`), a note
+gives `tables_matched` and `tables_total` and recalls the filters and `max`; an
+ELF where no table matched gets a note too. A field absent from the report stays
+absent. `drakkar_legend` with topic `native` defines every field in its VTABLES
+section.
+
+The mode returns candidates. A function in a table does not prove that a given
+indirect call targets it. Detection is structural: a block of data with that
+shape is rendered as a table, a table without method is not found, two adjacent
+tables can be merged, and a table relocated other than by a relative relocation
+(`R_AARCH64_ABS64`, packed APS2, an `ET_EXEC` without relative relocations) is
+missed. No reference to a table is not a proof either: a computed address or an
+ADRP and its ADD far apart escape `refs`.
+
+### Labelling native functions by their strings
+
+`drakkar_native_labels` runs `drakkar <apk> --native --native-labels=<elf|*>`
+with the filters below: for each function of an AArch64 ELF, with no execution,
+the strings it references and a readable label — the inverse index of
+`drakkar_native_strings` xrefs. It serves to name the functions of a stripped
+Rust binary and to find the functions referencing a text. The mode is on
+Drakkar's `feat/native-labels` branch, not yet merged; a Drakkar without it
+refuses the option, and its message comes back verbatim in `errors` and in the
+notes.
+
+The label is, in this order: a function name (`label_kind` `fn_name`: the
+identifier after a leading `] `, or a lowercase bracketed tag holding `_`), else
+a log tag (`log_tag`), else a `.rs` source path (`source_path`), else `none`. A
+string reached through a small fragment called by more than `fragment_fanout`
+functions is `shared`: it stays in `strings[]` but serves neither the label nor
+`match`, and a function whose strings are all shared is rendered only when `fn`
+asks for it.
+
+```text
+drakkar_native_labels {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/labels",
+                       "elf": "lib/arm64-v8a/libapp.so",
+                       "match": ["connect"], "strings_max": 20}
+→ argv: /corpus/sample.apk --native --native-labels=lib/arm64-v8a/libapp.so
+        --native-labels-match=connect --native-labels-strings-max=20
+        --format=json --json-out=/cases/2026-11/labels/report.json
+  result.labels[]: elf, functions_total, functions_matched, truncated, and every
+                   other ELF-level counter of the report
+  tails.functions: every field of each function as Drakkar writes it (fn_start, fn_end,
+                   bound, label, label_kind, all_tags, strings_total, strings_truncated,
+                   strings[] …), elf
+  tails.errors
+  report_path = /cases/2026-11/labels/report.json
+```
+
+| Parameter | |
+|---|---|
+| `apk` | required, absolute: one APK, or one raw ELF |
+| `elf` | path of the ELF in the APK, or `*`; omitted, `*`: every AArch64 ELF |
+| `fn` | `--native-labels-fn`: 1 to 64 hex addresses; keep the functions containing one of them |
+| `match` | `--native-labels-match`: substrings, case ignored; keep the functions with a string containing one of them |
+| `max` | `--native-labels-max`: functions Drakkar renders per ELF; `functions_total` and `functions_matched` stay exact |
+| `strings_max` | `--native-labels-strings-max`: strings Drakkar renders per function; `strings_total`, `label` and `all_tags` stay computed on all of them |
+| `fragment_fanout` | `--native-labels-fragment-fanout`: callers above which a string reached through a small fragment is shared, kept out of `label`, `names`, `all_tags` and `match` |
+| `out_dir`, `background`, `max_rows`, `timeout_seconds` | as for `drakkar_native_xrefs`, timeout class included |
+
+A parameter left out adds no option, so Drakkar's default applies; filters
+combine with AND. The server checks the form only — hex addresses, a list of 1 to
+64 distinct addresses, patterns neither empty nor holding a comma (Drakkar splits
+on it), integers not negative — and leaves every other refusal to Drakkar.
+
+The report of this mode is still evolving, so nothing is filtered or renamed: the
+head carries every ELF-level field but the `functions` array, and the `functions`
+tail every field of each function, unknown ones included, plus its `elf`, cut at
+`max_rows`. When Drakkar cut the list itself (`truncated`), a note gives
+`functions_matched` and `functions_total` and recalls the filters and `max`; an
+ELF where no function matched gets a note too. A field absent from the report
+stays absent. `drakkar_legend` with topic `native` defines every field in its
+LABELS section.
+
+The label is a reading aid, not a proven name. A string attached through a small
+fragment (`via_fragment`) belongs to one of the fragment's callers, not
+necessarily to all of them; an indirect, conditional or inner call to the
+fragment is not seen. A function whose strings escape the scan — a computed
+address, an ADRP and its ADD far apart — does not appear.
 
 ## The answer
 
