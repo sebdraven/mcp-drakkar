@@ -222,7 +222,7 @@ func TestNativeMissingReportAfterAFailureIsANote(t *testing.T) {
 	s, base := testService(t)
 	env := &Envelope{}
 	env.Drakkar.ExitCode = 2
-	if err := s.finishNative(env, filepath.Join(base, "report.json"), 50, false); err != nil {
+	if err := s.finishNative(env, filepath.Join(base, "report.json"), 50, false, false); err != nil {
 		t.Fatal(err)
 	}
 	if env.Result != nil || len(env.Notes) != 1 {
