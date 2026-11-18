@@ -68,7 +68,7 @@ func init() {
 	// --native-dex and --native-listing: Drakkar main, not yet in a tag
 	known["--native-dex"] = multiFlag
 	known["--native-listing"] = multiFlag
-	// --native-symex and its options: Drakkar branch feat/native-symex, not yet merged.
+	// --native-symex and its options: Drakkar main, Cargo.toml version 0.6.1 (not in the v0.6.1 tag).
 	// Drakkar splits the list options on commas; they go as one joined value.
 	known["--native-symex"] = valueFlag
 	known["--native-symex-watch"] = valueFlag

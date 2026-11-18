@@ -213,9 +213,10 @@ every field: what `heuristic` means, the values of `layout_source`, the keys of
 `drakkar_native_symex` runs `drakkar <apk> --native --native-symex=<function>`
 with the options below: a propagation of symbolic values through one AArch64
 function, path by path, with no execution and no solver. It answers where the
-value read or written at each watched instruction comes from. The mode is on
-Drakkar's `feat/native-symex` branch; a Drakkar without it refuses the option,
-and its message comes back verbatim in `errors` and in the notes.
+value read or written at each watched instruction comes from. The mode is in
+Drakkar 0.6.1 as its `main` declares it in `Cargo.toml` (the `v0.6.1` tag predates
+it); a Drakkar without it refuses the option, and its message comes back verbatim
+in `errors` and in the notes.
 
 ```text
 drakkar_native_symex {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/symex",
@@ -265,8 +266,9 @@ expression form in its SYMEX section.
 for each address of an AArch64 ELF, with no execution, the function that holds
 it, the direct branches to it (a function's callers), the instructions that form
 or access its address, and the data words that hold it (method tables). The mode
-is on Drakkar's `kepler/feat/native-symex` branch; a Drakkar without it refuses
-the option, and its message comes back verbatim in `errors` and in the notes.
+is in Drakkar 0.6.1 as its `main` declares it in `Cargo.toml` (the `v0.6.1` tag
+predates it); a Drakkar without it refuses the option, and its message comes back
+verbatim in `errors` and in the notes.
 
 ```text
 drakkar_native_xrefs {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/xrefs",
