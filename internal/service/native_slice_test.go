@@ -200,6 +200,74 @@ func TestNativeSliceTailIsCutAtMaxRowsWithExactTotals(t *testing.T) {
 	}
 }
 
+// A query with one source resting on two assumed stack reloads, one source
+// without, and one unknown source cut at alias_depth.
+const sliceAliasReportBody = `{"sha256": "abc", "elfs": [], "binding": [], "summary": {},
+ "slices": [
+  {"elf": "lib/arm64-v8a/libfoo.so", "fn_start": "0x2f000", "fn_end": "0x2f400", "bound": "symbol",
+   "queries": [
+    {"at": "0x2f3c0", "location": "x8", "complete": true, "steps": 40, "sources_total": 3, "sources_truncated": false,
+     "sources": [
+      {"kind": "arg", "location": "x1", "insn_addr": "0x2f000", "bytes": [0, 8], "aliases": ["0x2f100", "0x2f180"],
+       "chain": [{"insn_addr": "0x2f180", "mnemonic": "ldr", "operands": "x8, [sp, #0x18]"}], "chain_truncated": false},
+      {"kind": "const", "value": "0x5", "insn_addr": "0x2f010", "bytes": [0, 8], "chain": [], "chain_truncated": false},
+      {"kind": "unknown", "reason": "alias_depth", "insn_addr": "0x2f200", "bytes": [0, 8], "aliases": ["0x2f100", "0x2f180"],
+       "chain": [], "chain_truncated": false}
+     ]}
+   ]}
+ ],
+ "errors": []}
+`
+
+func TestNativeSliceAliasesPassAsIsAndAreNoted(t *testing.T) {
+	env := finishNativeSliceFixture(t, sliceAliasReportBody, 50)
+	sources := env.Tails["sources"]
+	if sources.Total != 3 {
+		t.Fatalf("sources tail = %+v", sources)
+	}
+	s0 := sources.Items[0].(map[string]any)
+	if a, ok := s0["aliases"].([]any); !ok || len(a) != 2 || a[0] != "0x2f100" || a[1] != "0x2f180" {
+		t.Errorf("aliases did not come back as is: %v", s0)
+	}
+	if _, present := sources.Items[1].(map[string]any)["aliases"]; present {
+		t.Error("a source without aliases got the key")
+	}
+	s2 := sources.Items[2].(map[string]any)
+	if a, ok := s2["aliases"].([]any); s2["kind"] != "unknown" || s2["reason"] != "alias_depth" || !ok || len(a) != 2 {
+		t.Errorf("the alias_depth source did not come back as is: %v", s2)
+	}
+
+	// Counted over the whole report, whatever max_rows keeps.
+	env = finishNativeSliceFixture(t, sliceAliasReportBody, 1)
+	if sources := env.Tails["sources"]; sources.Returned != 1 || !sources.Truncated {
+		t.Fatalf("sources tail = %+v", sources)
+	}
+	notes := strings.Join(env.Notes, "\n")
+	if !strings.Contains(notes, "query 0x2f3c0 x8 in lib/arm64-v8a/libfoo.so@0x2f000: 2 of 3 sources rest on an assumed stack reload (aliases): each holds only if the reloaded register does hold what was spilled") {
+		t.Errorf("no note for the aliased sources: %q", env.Notes)
+	}
+	if !strings.Contains(notes, "query 0x2f3c0 x8 in lib/arm64-v8a/libfoo.so@0x2f000: 1 of 3 sources are unknown with reason alias_depth: paths through aliases were cut at 2 assumed reloads") {
+		t.Errorf("no note for the alias_depth source: %q", env.Notes)
+	}
+}
+
+func TestNativeSliceWithoutAliasesHasNoAliasNote(t *testing.T) {
+	env := finishNativeSliceFixture(t, sliceReportBody, 50)
+	for _, it := range env.Tails["sources"].Items {
+		if _, present := it.(map[string]any)["aliases"]; present {
+			t.Errorf("aliases was made up: %v", it)
+		}
+	}
+	if len(env.Notes) != 3 {
+		t.Errorf("notes = %q, want the incomplete, no-source and errors notes only", env.Notes)
+	}
+	for _, n := range env.Notes {
+		if strings.Contains(n, "aliases") || strings.Contains(n, "alias_depth") {
+			t.Errorf("an alias note without alias: %q", n)
+		}
+	}
+}
+
 func TestNativeSliceReportWithoutEntry(t *testing.T) {
 	const body = `{"sha256": "abc", "elfs": [], "binding": [], "summary": {},
  "errors": ["slice *@0x2f000 : aucun ELF AArch64 n'a de code exécutable en 0x2f000"]}`
