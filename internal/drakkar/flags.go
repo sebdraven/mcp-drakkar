@@ -1,7 +1,8 @@
 package drakkar
 
-// The flag table mirrors the clap `Cli` struct of drakkar/src/main.rs at
-// 01eee3b6b8acf75bb15dd90e2ee5e301c1f90d21 (v0.2.0), and it is the whitelist: Args
+// The flag table mirrors the clap `Cli` struct of drakkar/src/main.rs,
+// checked against the 0.8.0 source named by version.DrakkarTested.
+// It is the whitelist: Args
 // refuses any name absent from it, so a flag this table does not know cannot
 // reach the command line. A parameter that maps to no known flag is an error,
 // never a passthrough.
@@ -59,16 +60,14 @@ func init() {
 
 	// Native libraries and archive entries
 	known["--native-arch"] = switchFlag
-	// --native: Drakkar main 7445743ff1c9df6ed781b703f2e6a887597cb023, not yet in a tag
 	known["--native"] = switchFlag
-	// --native-disasm and its bounds: Drakkar branch feat/native-disasm, not yet merged
+	// Native disassembly and its bounds.
 	known["--native-disasm"] = switchFlag
 	known["--disasm-depth"] = valueFlag
 	known["--disasm-max-insns"] = valueFlag
-	// --native-dex and --native-listing: Drakkar main, not yet in a tag
 	known["--native-dex"] = multiFlag
 	known["--native-listing"] = multiFlag
-	// --native-symex and its options: Drakkar main, Cargo.toml version 0.6.1 (not in the v0.6.1 tag).
+	// Symbolic execution and its options.
 	// Drakkar splits the list options on commas; they go as one joined value.
 	known["--native-symex"] = valueFlag
 	known["--native-symex-watch"] = valueFlag
@@ -82,12 +81,11 @@ func init() {
 	known["--native-symex-refine"] = valueFlag
 	known["--native-symex-follow"] = valueFlag
 	known["--native-symex-undirected"] = switchFlag
-	// --native-xrefs and its cap: Drakkar main, Cargo.toml version 0.6.1 (not in the v0.6.1 tag).
+	// Native references and their cap.
 	// Drakkar repeats --native-xrefs; the server passes one spec.
 	known["--native-xrefs"] = valueFlag
 	known["--native-xrefs-max"] = valueFlag
-	// --native-words, --native-vtables and its options: Drakkar main, Cargo.toml version 0.6.1
-	// (not in the v0.6.1 tag). Drakkar repeats --native-words; the server passes one spec.
+	// Native words and method tables. Drakkar repeats --native-words; the server passes one spec.
 	// Drakkar splits the address lists on commas; they go as one joined value.
 	known["--native-words"] = valueFlag
 	known["--native-vtables"] = valueFlag
@@ -97,7 +95,7 @@ func init() {
 	known["--native-vtables-at"] = valueFlag
 	known["--native-vtables-max"] = valueFlag
 	known["--native-vtables-refs"] = switchFlag
-	// --native-labels and its options: Drakkar branch feat/native-labels, not yet merged.
+	// Native function labels and their options.
 	// Drakkar splits --native-labels-fn and --native-labels-match on commas.
 	known["--native-labels"] = valueFlag
 	known["--native-labels-fn"] = valueFlag
@@ -105,9 +103,8 @@ func init() {
 	known["--native-labels-max"] = valueFlag
 	known["--native-labels-strings-max"] = valueFlag
 	known["--native-labels-fragment-fanout"] = valueFlag
-	// --native-find and its options: merged into Drakkar main (PR #54).
-	// --native-slice, --native-async-graph, --native-fields and their options:
-	// Drakkar branch feat/native-find, not yet merged. Drakkar splits the list
+	// Native field accesses, slices, async graphs and deserializer fields.
+	// Drakkar splits the list
 	// options on commas; they go as one joined value, always with '='.
 	known["--native-find"] = valueFlag
 	known["--native-find-off"] = valueFlag
