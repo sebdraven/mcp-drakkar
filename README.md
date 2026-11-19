@@ -920,8 +920,8 @@ drakkar_native_slice {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/sl
   result.slices[]: elf, fn_start, fn_end, bound, and queries[] reduced to at,
                    location, complete, steps, sources_total, sources_truncated
   tails.sources:   every source whole (kind, location or value, insn_addr,
-                   call_target, bytes, chain[] …), elf, fn_start, query_at,
-                   query_location
+                   call_target, bytes, chain[], aliases[] …), elf, fn_start,
+                   query_at, query_location
   tails.errors
   report_path = /cases/2026-11/slice/report.json
 ```
@@ -943,17 +943,29 @@ The head holds one entry per function, every entry-level field as is, its
 queries without their sources; the `sources` tail every source whole, chain
 included, with the `elf` and `fn_start` of its function and the `at` and
 `location` of its query as `query_at` and `query_location`, since a source has a
-`location` of its own. A note names each query whose `complete` is false — the
-`max_steps` budget or the `max_sources` cap was reached, the result is partial —
-and each query without any source. `drakkar_legend` with topic `native` defines
-every field in its SLICE section.
+`location` of its own. A source whose path assumed a stack reload equal to a
+spill carries `aliases`, the sorted addresses of those reloads, and holds only
+if the reloaded register does hold what was spilled. A note names each query
+whose `complete` is false — the `max_steps` budget or the `max_sources` cap was
+reached, the result is partial — each query without any source, and each query
+with sources resting on `aliases` or cut at `alias_depth`, with their count over
+the whole report, not only the rows kept by `max_rows`. `drakkar_legend` with
+topic `native` defines every field in its SLICE section.
 
 Every path of the flow graph is covered, impossible ones included: sources may
 be too many, never too few within the model and the budget, and `complete` says
-whether the budget cut. Different memory bases are assumed disjoint, so a write
-through a pointer computed otherwise is not seen. A write made by a called
-function that is not followed comes out as a `call` source, not as a value. An
-unresolved indirect jump cuts the walk on that path, with an `unknown` source.
+whether the budget cut. Different memory bases are assumed disjoint, except that
+an 8-byte register reloaded from a stack slot of the function where an 8-byte
+register was spilled, the spill reaching the reload, may hold the spilled value:
+a possibility that adds sources and never removes one. Only the function's own
+stack is tracked, so a write through a pointer computed otherwise (a heap
+structure, a task's state) is not seen, nor a spill made in an outlined
+fragment, in a called function or narrower than 8 bytes. A write made by a
+called function that is not followed comes out as a `call` source, not as a
+value. An unresolved indirect jump cuts the walk on that path, with an `unknown`
+source; an `unknown` source with `reason` `alias_depth` marks a step not taken
+because it would have assumed more than 2 reloads on the path, and carries the
+`aliases` already assumed.
 
 ### Crossing indirect calls through method tables
 
@@ -964,9 +976,14 @@ of an AArch64 ELF whose edges carry their proof — `call` when F holds a `bl` o
 method table of which G is a method or the destructor (`insn_addr`,
 `adrp_addr`, `table`, `offset`). In Rust an async task or a closure passed as a
 trait object is such a table, and the code creating the object forms its
-address: the graph goes on where the call graph stops at an indirect call. An
-edge leaving an outlined fragment is raised to each of its callers, with
-`via_fragment`; data words holding a table's address come apart in `stores`.
+address: the graph goes on where the call graph stops at an indirect call. A
+fragment is a bounded function of at most 64 bytes, neither the destructor nor a
+method of a detected table, that another function calls by `bl` or `b`: an edge
+leaving it is raised to each of its callers, with `via_fragment`. A small
+function that is a table entry, or that nothing calls directly, keeps its edges
+under its own start, without `via_fragment`, so a small trait method wrapping a
+task keeps its `makes` edge. Data words holding a table's address come apart in
+`stores`.
 
 ```text
 drakkar_native_async_graph {"apk": "/corpus/sample.apk", "out_dir": "/cases/2026-11/graph",
