@@ -61,15 +61,18 @@ The binary answers for itself, since nothing travels alongside it:
 
 ```
 $ mcp-drakkar -version
-mcp-drakkar 0.15.0
+mcp-drakkar 0.17.3
 commit:         <the full commit, injected at link time>
 target:         darwin/arm64
 go:             go1.27.1
-drakkar tested: 0.6.0 (33d1c0e3f55df245268f084f905d5b1534c6514f)
+drakkar tested: 0.8.0 (a4f50ed2973c2106e065008d004d9b000df5160c)
 ```
 
-`drakkar tested` is the Drakkar the tool surface was written against. Some
-native modes need a newer one; each section below says which.
+`drakkar tested` identifies the exact Drakkar source used for compatibility
+validation. The current surface is checked against 0.8.0, including stack-reload
+aliases in native slices and the refined fragment rules in async graphs.
+The older version requirements mentioned below describe when individual modes
+first became available, not the current validation target.
 
 ## Configuration
 
@@ -1218,11 +1221,27 @@ internal/mcptools/    the 38 tools, their descriptions and the server instructio
 internal/version/     what the server declares about itself
 ```
 
-**No test invokes `drakkar`.** The whitelist is tested on the argv it produces,
+**By default, no test invokes a real `drakkar`.** The whitelist is tested on the argv it produces,
 the TSV parsers on fixtures, the head/tail split on decoded reports, the refusals
 against a stub `drakkar` script, the output directory on a temporary directory,
 and the tool registration over an in-memory MCP transport. So CI needs no Rust
 toolchain, no samples, and no macOS.
+
+For opt-in compatibility checks, build or obtain the Drakkar 0.8.0 binary first,
+then run:
+
+```sh
+DRAKKAR_COMPAT_BIN=/absolute/path/to/drakkar go test ./internal/drakkar ./internal/service -run TestCompatibility -v -count=1
+```
+
+These tests check that every whitelisted flag appears in the CLI help, verify
+the reported version, and run the real native slice and async-graph tools on a
+generated AArch64 ELF. They assert both aliased and exact sources, alias notes,
+fragment edge lifting and retention of standalone function edges. No corpus,
+network analysis, installation or Rust build is performed by the tests.
+The normal suite separately covers `alias_depth`, truncation and report parsing
+with fixtures. This is targeted native compatibility validation, not an
+end-to-end run of every APK analysis mode.
 
 ## Releases
 
