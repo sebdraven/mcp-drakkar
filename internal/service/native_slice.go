@@ -156,8 +156,17 @@ func (s *Service) finishNativeSlice(env *Envelope, path string, maxRows int) err
 			}
 			reduced = append(reduced, headWithout(query, "sources"))
 			items, _ := query["sources"].([]any)
+			// Counted over the whole report, before max_rows.
+			aliased, cut := 0, 0
 			for _, it := range items {
 				sources = append(sources, sliceRow(e, query, it))
+				src, _ := it.(map[string]any)
+				if a, _ := src["aliases"].([]any); len(a) > 0 {
+					aliased++
+				}
+				if src["reason"] == "alias_depth" {
+					cut++
+				}
 			}
 			where := fmt.Sprintf("query %v %v in %v@%v", query["at"], query["location"], e["elf"], e["fn_start"])
 			if query["complete"] == false {
@@ -165,6 +174,12 @@ func (s *Service) finishNativeSlice(env *Envelope, path string, maxRows int) err
 			}
 			if query["sources_total"] == float64(0) {
 				notes = append(notes, where+" found no source")
+			}
+			if aliased > 0 {
+				notes = append(notes, fmt.Sprintf("%s: %d of %d sources rest on an assumed stack reload (aliases): each holds only if the reloaded register does hold what was spilled", where, aliased, len(items)))
+			}
+			if cut > 0 {
+				notes = append(notes, fmt.Sprintf("%s: %d of %d sources are unknown with reason alias_depth: paths through aliases were cut at 2 assumed reloads", where, cut, len(items)))
 			}
 		}
 		if _, present := e["queries"]; present {
