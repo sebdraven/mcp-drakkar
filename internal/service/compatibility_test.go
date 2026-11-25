@@ -25,8 +25,8 @@ func TestCompatibilityNative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := env.Result.(map[string]any)["drakkar_version"]; got != "drakkar 0.8.1" {
-		t.Fatalf("expected Drakkar 0.8.1, got %v", got)
+	if got := env.Result.(map[string]any)["drakkar_version"]; got != "drakkar 0.8.2" {
+		t.Fatalf("expected Drakkar 0.8.2, got %v", got)
 	}
 	elf := compatibilityELF(t)
 	check := func(t *testing.T, env *Envelope, err error) {
