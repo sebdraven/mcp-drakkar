@@ -61,15 +61,15 @@ The binary answers for itself, since nothing travels alongside it:
 
 ```
 $ mcp-drakkar -version
-mcp-drakkar 0.17.4
+mcp-drakkar 0.17.5
 commit:         <the full commit, injected at link time>
 target:         darwin/arm64
 go:             go1.27.1
-drakkar tested: 0.8.1 (3df7a2f987cd90873e440379892b7061b6d8dde3)
+drakkar tested: 0.8.2 (9924afc8780600d0d2a0f91321ea83bec26d4af6)
 ```
 
 `drakkar tested` identifies the exact Drakkar source used for compatibility
-validation. The current surface is checked against 0.8.1, including stack-reload
+validation. The current surface is checked against 0.8.2, including stack-reload
 aliases in native slices and the refined fragment rules in async graphs.
 The older version requirements mentioned below describe when individual modes
 first became available, not the current validation target.
@@ -1227,7 +1227,7 @@ against a stub `drakkar` script, the output directory on a temporary directory,
 and the tool registration over an in-memory MCP transport. So CI needs no Rust
 toolchain, no samples, and no macOS.
 
-For opt-in compatibility checks, build or obtain the Drakkar 0.8.1 binary first,
+For opt-in compatibility checks, build or obtain the Drakkar 0.8.2 binary first,
 then run:
 
 ```sh

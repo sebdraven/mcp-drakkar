@@ -4,7 +4,7 @@ package version
 // Version is declared here rather than injected at link time, so that the
 // release workflow has something to compare the tag against. A version that
 // only ever comes from -ldflags can never disagree with the tag.
-const Version = "0.17.4"
+const Version = "0.17.5"
 
 // DrakkarTested names the Drakkar the tool surface was written against. A
 // version number can stay put across many commits, so the commit is the
@@ -14,7 +14,7 @@ const Version = "0.17.4"
 // A constant here rather than a -ldflags injection for the same reason as
 // Version: injecting it would mean the release workflow had to know a value that
 // lives in the code.
-const DrakkarTested = "0.8.1 (3df7a2f987cd90873e440379892b7061b6d8dde3)"
+const DrakkarTested = "0.8.2 (9924afc8780600d0d2a0f91321ea83bec26d4af6)"
 
 // Commit is injected at link time by the release workflow.
 var Commit = "unknown"
